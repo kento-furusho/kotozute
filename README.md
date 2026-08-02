@@ -19,6 +19,23 @@
 * [Golang](https://golang.org)
 * SAM CLI - [SAM CLIのインストール](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
 
+## ローカル開発の始め方
+
+ローカルの DynamoDB は本番の IAM キーを使わず、ダミー認証情報（`AWS_ACCESS_KEY_ID=local` 等）で統一している（詳細は `CLAUDE.md` / `IMPLEMENTATION.md` を参照）。
+
+```bash
+# 1. DynamoDB Local を起動（Docker）
+docker run -d -p 8000:8000 --name dynamodb-local amazon/dynamodb-local
+
+# 2. メインテーブル kotozute を作成
+./scripts/create-table.sh
+
+# 3. GUI で中身を確認したいとき
+./scripts/db-admin.sh
+```
+
+Lambda（Go）をローカル実行するときは `sam local invoke` / `sam local start-api` に `--env-vars env.json` を渡す。手順は `IMPLEMENTATION.md` を参照。
+
 ## セットアップ手順
 
 ### 依存関係のインストールとターゲットのビルド

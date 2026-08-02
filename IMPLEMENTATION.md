@@ -3,7 +3,7 @@
 ## 現在地（2026-08-02 時点）
 - SAM プロジェクト初期化済み（Go / provided.al2023 / arm64）。
 - Git 初期化・リモート登録・初回コミット済み。`.gitignore` 設定済み（`.aws-sam/` 等を除外）。
-- DynamoDB Local を Docker で起動し、メインテーブル `kotozute`（PK/SK）を作成済み。
+- DynamoDB Local を Docker で起動し、`scripts/create-table.sh` でメインテーブル `kotozute`（PK/SK）を作成済み（ダミー認証情報で統一。理由は下記「ローカル開発」参照）。
 - **`POST /kotozute`（ことづてを書く）が完成・動作確認済み。**
   - `hello-world/` を `functions/post-kotozute/` に整理（Hello World は削除、最初の実関数に差し替え）。
   - AWS SDK for Go v2（`config` / `dynamodb`）と `google/uuid` を依存に追加。
@@ -22,13 +22,34 @@ kotozute/
 ├── events/
 │   ├── event.json              # (旧Hello World用、参考)
 │   └── post-kotozute.json      # sam local invoke 用サンプルイベント
-├── env.json                    # ローカル用 DYNAMODB_ENDPOINT（gitignore済み。各自作成する）
+├── scripts/
+│   ├── create-table.sh         # DynamoDB Local にメインテーブルを作成（ダミーキー）
+│   └── db-admin.sh             # dynamodb-admin（GUI）をダミーキーで起動
+├── env.json                    # ローカル用 DYNAMODB_ENDPOINT・ダミー認証情報（gitignore済み。各自作成する）
 ├── Makefile
 ├── CLAUDE.md                   # プロジェクト指示書（先に読む）
 └── IMPLEMENTATION.md            # このファイル
 ```
 
+### ローカル開発の認証情報（ダミーキーに統一）
+DynamoDB Local は「リージョン × アクセスキー」ごとにデータ領域が分かれる。本番の IAM キーをローカル接続に使うと、キーをローテーションしたときにローカルのテーブルが迷子になる。そのため、ローカルで DynamoDB Local を触るときは CLI でも Lambda ローカル実行でも必ず以下のダミー認証情報で統一する（本番キーはローカルには一切使わない）。
+
+```
+AWS_ACCESS_KEY_ID=local
+AWS_SECRET_ACCESS_KEY=local
+AWS_REGION=ap-northeast-1
+```
+
+CLI からの操作は `scripts/` 配下のスクリプトを使う（両方ダミーキー・実行権限付与済み）:
+```bash
+./scripts/create-table.sh   # メインテーブル kotozute（PK/SK）を作成
+./scripts/db-admin.sh       # dynamodb-admin（GUI）を起動
+```
+※ GSI①②は未定義。GSI を使う機能（ログイン、バッチ）を実装するときは `scripts/create-table.sh` に GSI 定義を追加する。
+
 ### ローカルで POST /kotozute を試す
+`sam local` は Lambda を Docker コンテナ内で動かすため、コンテナから見たローカル DB のエンドポイントは `http://localhost:8000` ではなく `http://host.docker.internal:8000` になる。Go コードは環境変数 `DYNAMODB_ENDPOINT` で接続先を切り替える設計なので、ローカル実行時はこれを `http://host.docker.internal:8000` に、認証情報を上記ダミーキーにする。
+
 ```bash
 # 1回だけの呼び出し確認
 sam build
@@ -38,11 +59,14 @@ sam local invoke PostKotozuteFunction --event events/post-kotozute.json --env-va
 sam local start-api --env-vars env.json
 curl -X POST http://127.0.0.1:3000/kotozute -H 'Content-Type: application/json' -d '{"body":"ありがとう"}'
 ```
-`env.json`（gitignore対象。各自ローカルに作成）:
+`env.json`（gitignore対象。各自ローカルに作成。関数が増えたらキーを追加する）:
 ```json
 {
   "PostKotozuteFunction": {
-    "DYNAMODB_ENDPOINT": "http://host.docker.internal:8000"
+    "DYNAMODB_ENDPOINT": "http://host.docker.internal:8000",
+    "AWS_ACCESS_KEY_ID": "local",
+    "AWS_SECRET_ACCESS_KEY": "local",
+    "AWS_REGION": "ap-northeast-1"
   }
 }
 ```

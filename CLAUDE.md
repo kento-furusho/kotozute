@@ -170,25 +170,31 @@ UI デザインは `docs/design/` に配置。画面のコード（Claude Design
 ---
 
 ## ローカル開発コマンド
+
+### 認証情報はダミーキーに統一する
+DynamoDB Local は「リージョン × アクセスキー」ごとにデータ領域が分かれる。本番の IAM キーをローカル接続に使うと、キーをローテーションしたときにローカルのテーブルが迷子になるため、ローカル操作（CLI・Lambda ローカル実行のどちらも）は必ず以下のダミー認証情報で統一する。本番キーはローカルには一切使わない。
+```
+AWS_ACCESS_KEY_ID=local
+AWS_SECRET_ACCESS_KEY=local
+AWS_REGION=ap-northeast-1
+```
+
 ```bash
 # DynamoDB Local 起動（Docker）
 docker run -d -p 8000:8000 --name dynamodb-local amazon/dynamodb-local
 
-# テーブル作成（メインテーブル。GSIは別途追加）
-aws dynamodb create-table \
-  --table-name kotozute \
-  --attribute-definitions AttributeName=PK,AttributeType=S AttributeName=SK,AttributeType=S \
-  --key-schema AttributeName=PK,KeyType=HASH AttributeName=SK,KeyType=RANGE \
-  --billing-mode PAY_PER_REQUEST \
-  --endpoint-url http://localhost:8000
+# テーブル作成・GUI確認は scripts/ のスクリプトを使う（ダミーキー・実行権限付与済み）
+./scripts/create-table.sh   # メインテーブル kotozute（PK/SK）を作成
+./scripts/db-admin.sh       # dynamodb-admin（GUI）を起動
 
 # テーブル確認
-aws dynamodb list-tables --endpoint-url http://localhost:8000
+AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local AWS_REGION=ap-northeast-1 \
+  aws dynamodb list-tables --endpoint-url http://localhost:8000
 
-# ビルド & ローカル実行
+# ビルド & ローカル実行（env.json でダミーキーと DYNAMODB_ENDPOINT を渡す。詳細は IMPLEMENTATION.md）
 sam build
-sam local invoke
-sam local start-api   # http://127.0.0.1:3000 でAPIを立てる
+sam local invoke --env-vars env.json
+sam local start-api --env-vars env.json   # http://127.0.0.1:3000 でAPIを立てる
 ```
 
-**未対応**：GSI①②はまだ作成コマンドを用意していない。GSI を使う機能（ログイン、バッチ）実装時に、テーブル作成コマンドへ GSI 定義を追加すること。
+**未対応**：GSI①②はまだ `scripts/create-table.sh` に定義していない。GSI を使う機能（ログイン、バッチ）実装時に、このスクリプトへ GSI 定義を追加すること。
