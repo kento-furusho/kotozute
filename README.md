@@ -1,62 +1,62 @@
 # kotozute
 
-This is a sample template for kotozute - Below is a brief explanation of what we have generated for you:
+これは kotozute のサンプルテンプレートです。以下は生成された内容の簡単な説明です。
 
 ```bash
 .
-├── Makefile                    <-- Make to automate build
-├── README.md                   <-- This instructions file
-├── hello-world                 <-- Source code for a lambda function
-│   ├── main.go                 <-- Lambda function code
-│   └── main_test.go            <-- Unit tests
+├── Makefile                    <-- ビルドを自動化するMake
+├── README.md                   <-- この説明ファイル
+├── hello-world                 <-- Lambda関数のソースコード
+│   ├── main.go                 <-- Lambda関数のコード
+│   └── main_test.go            <-- ユニットテスト
 └── template.yaml
 ```
 
-## Requirements
+## 必要条件
 
-* AWS CLI already configured with Administrator permission
-* [Docker installed](https://www.docker.com/community-edition)
+* 管理者権限で設定済みのAWS CLI
+* [Dockerのインストール](https://www.docker.com/community-edition)
 * [Golang](https://golang.org)
-* SAM CLI - [Install the SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
+* SAM CLI - [SAM CLIのインストール](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
 
-## Setup process
+## セットアップ手順
 
-### Installing dependencies & building the target 
+### 依存関係のインストールとターゲットのビルド
 
-In this example we use the built-in `sam build` to automatically download all the dependencies and package our build target.   
-Read more about [SAM Build here](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-cli-command-reference-sam-build.html) 
+この例では、組み込みの `sam build` を使用して依存関係を自動的にダウンロードし、ビルドターゲットをパッケージ化します。
+[SAM Buildについて詳しくはこちら](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-cli-command-reference-sam-build.html)
 
-The `sam build` command is wrapped inside of the `Makefile`. To execute this simply run
- 
+`sam build` コマンドは `Makefile` の中にラップされています。実行するには以下を実行するだけです。
+
 ```shell
 make
 ```
 
-### Local development
+### ローカル開発
 
-**Invoking function locally through local API Gateway**
+**ローカルAPI Gatewayを通じて関数をローカルで呼び出す**
 
 ```bash
 sam local start-api
 ```
 
-If the previous command ran successfully you should now be able to hit the following local endpoint to invoke your function `http://localhost:3000/hello`
+前のコマンドが正常に実行されれば、次のローカルエンドポイントにアクセスして関数を呼び出せるようになります: `http://localhost:3000/hello`
 
-**SAM CLI** is used to emulate both Lambda and API Gateway locally and uses our `template.yaml` to understand how to bootstrap this environment (runtime, where the source code is, etc.) - The following excerpt is what the CLI will read in order to initialize an API and its routes:
+**SAM CLI** はLambdaとAPI Gatewayの両方をローカルでエミュレートするために使用され、この環境をブートストラップする方法（ランタイム、ソースコードの場所など）を理解するために `template.yaml` を使用します。以下はCLIがAPIとそのルートを初期化するために読み込む内容の抜粋です。
 
 ```yaml
 ...
 Events:
     HelloWorld:
-        Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+        Type: Api # API Event Sourceについての詳細情報: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
         Properties:
             Path: /hello
             Method: get
 ```
 
-## Packaging and deployment
+## パッケージ化とデプロイ
 
-AWS Lambda Golang runtime requires a flat folder with the executable generated on build step. SAM will use `CodeUri` property to know where to look up for the application:
+AWS LambdaのGolangランタイムでは、ビルドステップで生成された実行可能ファイルを含むフラットなフォルダが必要です。SAMは `CodeUri` プロパティを使用してアプリケーションの場所を把握します。
 
 ```yaml
 ...
@@ -67,47 +67,47 @@ AWS Lambda Golang runtime requires a flat folder with the executable generated o
             ...
 ```
 
-To deploy your application for the first time, run the following in your shell:
+アプリケーションを初めてデプロイするには、シェルで以下を実行します。
 
 ```bash
 sam deploy --guided
 ```
 
-The command will package and deploy your application to AWS, with a series of prompts:
+このコマンドはアプリケーションをパッケージ化してAWSにデプロイし、その際に一連のプロンプトが表示されます。
 
-* **Stack Name**: The name of the stack to deploy to CloudFormation. This should be unique to your account and region, and a good starting point would be something matching your project name.
-* **AWS Region**: The AWS region you want to deploy your app to.
-* **Confirm changes before deploy**: If set to yes, any change sets will be shown to you before execution for manual review. If set to no, the AWS SAM CLI will automatically deploy application changes.
-* **Allow SAM CLI IAM role creation**: Many AWS SAM templates, including this example, create AWS IAM roles required for the AWS Lambda function(s) included to access AWS services. By default, these are scoped down to minimum required permissions. To deploy an AWS CloudFormation stack which creates or modifies IAM roles, the `CAPABILITY_IAM` value for `capabilities` must be provided. If permission isn't provided through this prompt, to deploy this example you must explicitly pass `--capabilities CAPABILITY_IAM` to the `sam deploy` command.
-* **Save arguments to samconfig.toml**: If set to yes, your choices will be saved to a configuration file inside the project, so that in the future you can just re-run `sam deploy` without parameters to deploy changes to your application.
+* **Stack Name**: CloudFormationにデプロイするスタックの名前です。アカウントとリージョン内で一意である必要があり、プロジェクト名に合わせたものが良い出発点になります。
+* **AWS Region**: アプリケーションをデプロイしたいAWSリージョンです。
+* **Confirm changes before deploy**: 「yes」に設定すると、実行前に変更セットが表示され手動でレビューできます。「no」に設定すると、AWS SAM CLIはアプリケーションの変更を自動的にデプロイします。
+* **Allow SAM CLI IAM role creation**: この例を含む多くのAWS SAMテンプレートは、含まれるAWS Lambda関数がAWSサービスにアクセスするために必要なAWS IAMロールを作成します。デフォルトでは、これらは必要最小限の権限に制限されています。IAMロールを作成または変更するAWS CloudFormationスタックをデプロイするには、`capabilities` に `CAPABILITY_IAM` の値を指定する必要があります。このプロンプトで許可が与えられない場合、この例をデプロイするには `sam deploy` コマンドに明示的に `--capabilities CAPABILITY_IAM` を渡す必要があります。
+* **Save arguments to samconfig.toml**: 「yes」に設定すると、選択内容がプロジェクト内の設定ファイルに保存され、今後はパラメータなしで `sam deploy` を再実行するだけでアプリケーションの変更をデプロイできるようになります。
 
-You can find your API Gateway Endpoint URL in the output values displayed after deployment.
+デプロイ後に表示される出力値の中に、API GatewayエンドポイントのURLを確認できます。
 
-### Testing
+### テスト
 
-We use `testing` package that is built-in in Golang and you can simply run the following command to run our tests:
+Golangに組み込まれている `testing` パッケージを使用しており、以下のコマンドを実行するだけでテストを実行できます。
 
 ```shell
 cd ./hello-world/
 go test -v .
 ```
-# Appendix
+# 付録
 
-### Golang installation
+### Golangのインストール
 
-Please ensure Go 1.x (where 'x' is the latest version) is installed as per the instructions on the official golang website: https://golang.org/doc/install
+Go 1.x（'x'は最新バージョン）が、公式のgolangウェブサイトの手順に従ってインストールされていることを確認してください: https://golang.org/doc/install
 
-A quickstart way would be to use Homebrew, chocolatey or your linux package manager.
+簡単な方法としては、Homebrew、chocolatey、またはお使いのLinuxパッケージマネージャーを使用することです。
 
 #### Homebrew (Mac)
 
-Issue the following command from the terminal:
+ターミナルから以下のコマンドを実行します。
 
 ```shell
 brew install golang
 ```
 
-If it's already installed, run the following command to ensure it's the latest version:
+すでにインストールされている場合は、以下のコマンドを実行して最新バージョンであることを確認してください。
 
 ```shell
 brew update
@@ -116,26 +116,26 @@ brew upgrade golang
 
 #### Chocolatey (Windows)
 
-Issue the following command from the powershell:
+powershellから以下のコマンドを実行します。
 
 ```shell
 choco install golang
 ```
 
-If it's already installed, run the following command to ensure it's the latest version:
+すでにインストールされている場合は、以下のコマンドを実行して最新バージョンであることを確認してください。
 
 ```shell
 choco upgrade golang
 ```
 
-## Bringing to the next level
+## 次のレベルへ
 
-Here are a few ideas that you can use to get more acquainted as to how this overall process works:
+このプロセス全体の理解を深めるために使える、いくつかのアイデアを紹介します。
 
-* Create an additional API resource (e.g. /hello/{proxy+}) and return the name requested through this new path
-* Update unit test to capture that
-* Package & Deploy
+* 追加のAPIリソース（例: /hello/{proxy+}）を作成し、この新しいパス経由でリクエストされた名前を返す
+* それを検証するためにユニットテストを更新する
+* パッケージ化とデプロイ
 
-Next, you can use the following resources to know more about beyond hello world samples and how others structure their Serverless applications:
+次に、hello worldサンプルを超えて、他の人がサーバーレスアプリケーションをどのように構成しているかについて詳しく知るために、以下のリソースを利用できます。
 
 * [AWS Serverless Application Repository](https://aws.amazon.com/serverless/serverlessrepo/)
