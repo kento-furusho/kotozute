@@ -1,0 +1,16 @@
+# SAM build artifacts
+.aws-sam/
+
+# Go build output
+bootstrap
+*.exe
+*.test
+*.out
+
+# macOS
+.DS_Store
+
+# 環境変数・秘密情報（今後使う用に先に入れておく）
+.env
+env.json
+samconfig.toml
