@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FAF8F3;-webkit-font-smoothing:antialiased}
+a{color:#E4573D}a:hover{color:#C23F27}
+</style>
+</helmet>
+<div style="padding:56px 60px 80px;font-family:'Zen Maru Gothic',system-ui,sans-serif;color:#3A322C">
+  <div style="max-width:820px;display:flex;flex-direction:column;gap:16px;margin-bottom:44px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:34px;height:34px;background:#FFD84D;border-radius:8px 8px 10px 10px;transform:rotate(-6deg);box-shadow:0 2px 0 rgba(0,0,0,.08)"></div>
+      <h1 style="margin:0;font-size:34px;font-weight:900;letter-spacing:.04em">ことづて</h1>
+      <span style="font-size:13px;color:#8C8078;padding-bottom:2px">UIデザインボード / v1 ・ 初回導線 A</span>
+    </div>
+    <p style="margin:0;font-size:15px;line-height:1.9;color:#5C534C;text-wrap:pretty">①は惹きつけのみ、仕組みの説明は③に一度だけ。招待の前に必ず1枚書かせる順序。タイトルは名詞、説明は常体1文。</p>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:2px"><a href="./kotodute-board-onboarding-b.dc.html" style="font-size:14px;font-weight:700;border-bottom:2px solid #E4573D;text-decoration:none;padding-bottom:2px">初回導線B（⑤⑥⑬⑭） →</a><a href="./kotodute-board-main.dc.html" style="font-size:14px;font-weight:700;border-bottom:2px solid #E4573D;text-decoration:none;padding-bottom:2px">通常利用（⑦〜⑫） →</a></div>
+  </div>
+<!-- ===== 初回導線 ===== -->
+  <div style="margin:70px 0 24px;display:flex;align-items:baseline;gap:12px">
+    <span style="font:700 11px/1 ui-monospace,Menlo,monospace;padding:5px 8px;background:#3A322C;color:#fff;border-radius:5px">ONBOARDING</span>
+    <span style="font-size:17px;font-weight:700">①〜④ 入口とコンセプト</span>
+    <span style="font-size:12.5px;color:#8C8078">①は惹きつけのみ／仕組みの説明は③に一度だけ</span>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:46px;align-items:flex-start">
+
+    <!-- ① はじめる -->
+    <div data-screen-label="01-start" style="display:flex;flex-direction:column;gap:12px;width:390px">
+      <div style="display:flex;align-items:baseline;gap:9px"><span style="font:700 11px/1 ui-monospace,monospace;padding:4px 7px;background:#E4573D;color:#fff;border-radius:5px">①</span><span style="font-size:13.5px;font-weight:700">はじめる</span><span style="font-size:11.5px;color:#8C8078">価値だけ、仕組みは言わない</span></div>
+      <div style="position:relative;width:390px;height:844px;border-radius:34px;overflow:hidden;background:#FFFAEE;box-shadow:0 20px 40px -18px rgba(58,50,44,.4)">
+        <div style="position:absolute;left:-60px;top:-60px;width:300px;height:300px;border-radius:99px;background:#FFE9A0;opacity:.75"></div>
+        <div style="position:absolute;right:-80px;top:180px;width:260px;height:260px;border-radius:99px;background:#FFD6C6;opacity:.65"></div>
+        <div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:16px 26px 0;font-size:13px;font-weight:700"><span>9:41</span><div style="display:flex;gap:5px;align-items:center"><div style="width:16px;height:9px;border:1.5px solid #3A322C;border-radius:2px"></div><div style="width:22px;height:11px;border:1.5px solid #3A322C;border-radius:3px"></div></div></div>
+
+        <div style="position:relative;padding:56px 34px 0">
+          <h1 style="margin:0;font-size:40px;font-weight:900;letter-spacing:.06em">ことづて</h1>
+          <p style="margin:18px 0 0;font-size:19px;line-height:1.8;font-weight:500;color:#4A423B;text-wrap:pretty">言いそこねた「ありがとう」を、<br>ことづてにして貼っておきます。</p>
+        </div>
+
+        <div style="position:absolute;left:0;right:0;top:330px;height:300px">
+          <div style="position:absolute;left:44px;top:20px;width:132px;height:132px;background:linear-gradient(160deg,#FFE9A0,#FFDC72);transform:rotate(-7deg);box-shadow:0 12px 22px -12px rgba(58,50,44,.5)"><div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);width:46px;height:17px;background:rgba(255,255,255,.65)"></div><p style="margin:0;padding:26px 14px 0;font-family:'Klee One',serif;font-weight:600;font-size:13px;line-height:1.6;color:#4A3B2A">おかえりの声、元気だった</p></div>
+          <div style="position:absolute;left:180px;top:70px;width:144px;height:144px;background:linear-gradient(160deg,#D2EFE0,#B9E6D0);transform:rotate(6deg);box-shadow:0 12px 22px -12px rgba(58,50,44,.5)"><div style="position:absolute;top:-8px;right:16px;width:44px;height:17px;background:rgba(255,255,255,.65);transform:rotate(7deg)"></div><p style="margin:0;padding:28px 16px 0;font-family:'Klee One',serif;font-weight:600;font-size:13px;line-height:1.6;color:#2F4A3E">プリン、ゆずってくれた</p></div>
+          <div style="position:absolute;left:96px;top:170px;width:124px;height:124px;background:linear-gradient(160deg,#EFE0FF,#DCC8F8);transform:rotate(3deg);box-shadow:0 12px 22px -12px rgba(58,50,44,.5)"><div style="position:absolute;top:-8px;left:20px;width:42px;height:17px;background:rgba(255,255,255,.65);transform:rotate(-6deg)"></div><p style="margin:0;padding:26px 14px 0;font-family:'Klee One',serif;font-weight:600;font-size:13px;line-height:1.6;color:#43305C">寝る前の「おつかれ」</p></div>
+        </div>
+
+        <div style="position:absolute;left:26px;right:26px;bottom:56px;display:flex;flex-direction:column;gap:16px;align-items:center">
+          <p style="margin:0;text-align:center;font-family:'Klee One',serif;font-weight:600;font-size:14.5px;line-height:1.8;color:#6B6058">ふたりの壁に、静かにたまっていきます。</p>
+          <div style="width:100%;display:flex;align-items:center;justify-content:center;height:62px;background:#E4573D;border-radius:19px;box-shadow:0 12px 22px -8px rgba(228,87,61,.7)">
+            <span style="font-size:18px;font-weight:700;color:#fff;letter-spacing:.05em">はじめる</span>
+          </div>
+          <span style="font-size:12.5px;color:#9A8E83">招待リンクから来た人はこちら</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ② 登録 -->
+    <div data-screen-label="02-signup" style="display:flex;flex-direction:column;gap:12px;width:390px">
+      <div style="display:flex;align-items:baseline;gap:9px"><span style="font:700 11px/1 ui-monospace,monospace;padding:4px 7px;background:#E4573D;color:#fff;border-radius:5px">②</span><span style="font-size:13.5px;font-weight:700">登録</span><span style="font-size:11.5px;color:#8C8078">入力はメールだけ／パスワードなし</span></div>
+      <div style="position:relative;width:390px;height:844px;border-radius:34px;overflow:hidden;background:#FFFCF6;box-shadow:0 20px 40px -18px rgba(58,50,44,.4)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 26px 0;font-size:13px;font-weight:700"><span>9:41</span><div style="display:flex;gap:5px;align-items:center"><div style="width:16px;height:9px;border:1.5px solid #3A322C;border-radius:2px"></div><div style="width:22px;height:11px;border:1.5px solid #3A322C;border-radius:3px"></div></div></div>
+        <div style="padding:22px 24px 0;font-size:15px;color:#8A7B6C">もどる</div>
+
+        <div style="padding:46px 30px 0">
+          <h2 style="margin:0;font-size:27px;font-weight:900;line-height:1.5">メールアドレスだけ</h2>
+          <p style="margin:14px 0 0;font-size:14.5px;line-height:1.9;color:#6B6058">パスワードなしで、<br>ログイン用のリンクを送ります。</p>
+        </div>
+
+        <div style="padding:36px 30px 0;display:flex;flex-direction:column;gap:12px">
+          <div style="height:62px;border-radius:16px;background:#F7F1E6;border:2px solid #3A322C;display:flex;align-items:center;padding:0 18px">
+            <span style="font-size:16.5px;color:#3A322C">futari@example.com</span>
+            <span style="display:inline-block;width:2px;height:22px;background:#E4573D;margin-left:2px"></span>
+          </div>
+          <span style="font-size:12px;color:#A0958C;padding-left:4px">メールのリンクをタップすれば、ログイン完了です。</span>
+        </div>
+
+        <div style="position:absolute;left:26px;right:26px;bottom:56px;display:flex;flex-direction:column;gap:14px;align-items:center">
+          <div style="width:100%;display:flex;align-items:center;justify-content:center;height:62px;background:#E4573D;border-radius:19px;box-shadow:0 12px 22px -8px rgba(228,87,61,.7)">
+            <span style="font-size:18px;font-weight:700;color:#fff;letter-spacing:.05em">リンクをもらう</span>
+          </div>
+          <span style="font-size:11.5px;color:#A0958C;text-align:center;line-height:1.7">利用規約・プライバシーポリシーに同意のうえ進みます</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ③-1 -->
+    <div data-screen-label="03a-onboarding" style="display:flex;flex-direction:column;gap:12px;width:390px">
+      <div style="display:flex;align-items:baseline;gap:9px"><span style="font:700 11px/1 ui-monospace,monospace;padding:4px 7px;background:#E4573D;color:#fff;border-radius:5px">③-1</span><span style="font-size:13.5px;font-weight:700">たまる／週に一度のオープン</span><span style="font-size:11.5px;color:#8C8078">図で見せる。文章は最小</span></div>
+      <div style="position:relative;width:390px;height:844px;border-radius:34px;overflow:hidden;background:#F7F2E9;box-shadow:0 20px 40px -18px rgba(58,50,44,.4)">
+        <div style="position:absolute;inset:0;background-image:radial-gradient(rgba(0,0,0,.05) 1px,transparent 1px);background-size:16px 16px"></div>
+        <div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:16px 26px 0;font-size:13px;font-weight:700"><span>9:41</span><div style="display:flex;gap:5px;align-items:center"><div style="width:16px;height:9px;border:1.5px solid #3A322C;border-radius:2px"></div><div style="width:22px;height:11px;border:1.5px solid #3A322C;border-radius:3px"></div></div></div>
+        <div style="position:relative;display:flex;justify-content:flex-end;padding:20px 26px 0"><span style="font-size:14px;color:#9A8E83">スキップ</span></div>
+
+        <!-- 図：曜日レーンに積まれ、日曜でオープン -->
+        <div style="position:absolute;left:0;right:0;top:104px;bottom:118px;display:flex;flex-direction:column;justify-content:flex-start;gap:26px">
+        <div style="position:relative;margin:0 22px;padding:22px 18px 22px;background:rgba(255,255,255,.55);border-radius:22px;border:1.5px dashed rgba(58,50,44,.16);display:flex;flex-direction:column;gap:18px">
+          <span style="font-size:12px;color:#8A7B6C;letter-spacing:.06em">書いた日に貼られて、そのまま</span>
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 10px;justify-items:stretch">
+            <div style="display:flex;flex-direction:column;align-items:stretch;gap:7px;text-align:center">
+              <div style="position:relative;width:100%;aspect-ratio:1;background:linear-gradient(160deg,#FFE9A0,#FFDC72);transform:rotate(-5deg);box-shadow:0 6px 12px -7px rgba(58,50,44,.5)"><div style="position:absolute;top:-5px;left:50%;transform:translateX(-50%);width:26px;height:12px;background:rgba(255,255,255,.62)"></div></div>
+              <span style="font-size:11px;color:#8A7B6C">月</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:stretch;gap:7px;text-align:center">
+              <div style="position:relative;width:100%;aspect-ratio:1"><div style="position:absolute;inset:0;border:1.5px dashed rgba(58,50,44,.18)"></div></div>
+              <span style="font-size:11px;color:#B4A99E">火</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:stretch;gap:7px;text-align:center">
+              <div style="position:relative;width:100%;aspect-ratio:1">
+                <div style="position:absolute;inset:0;background:linear-gradient(160deg,#FFD6C6,#FFC0AB);transform:rotate(4deg);box-shadow:0 6px 12px -7px rgba(58,50,44,.5)"></div>
+                <div style="position:absolute;inset:0;background:linear-gradient(160deg,#D2EFE0,#B9E6D0);transform:rotate(-4deg) translateY(-4px);box-shadow:0 6px 12px -7px rgba(58,50,44,.5)"><div style="position:absolute;top:-5px;right:10px;width:24px;height:12px;background:rgba(255,255,255,.62);transform:rotate(6deg)"></div></div>
+              </div>
+              <span style="font-size:11px;color:#8A7B6C">水</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:stretch;gap:7px;text-align:center">
+              <div style="position:relative;width:100%;aspect-ratio:1"><div style="position:absolute;inset:0;border:1.5px dashed rgba(58,50,44,.18)"></div></div>
+              <span style="font-size:11px;color:#B4A99E">木</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:stretch;gap:7px;text-align:center">
+              <div style="position:relative;width:100%;aspect-ratio:1;background:linear-gradient(160deg,#DCE9FB,#C4DAF6);transform:rotate(5deg);box-shadow:0 6px 12px -7px rgba(58,50,44,.5)"><div style="position:absolute;top:-5px;left:12px;width:24px;height:12px;background:rgba(255,255,255,.62);transform:rotate(-6deg)"></div></div>
+              <span style="font-size:11px;color:#8A7B6C">金</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:stretch;gap:7px;text-align:center">
+              <div style="position:relative;width:100%;aspect-ratio:1">
+                <div style="position:absolute;inset:0;background:linear-gradient(160deg,#FFE9A0,#FFDC72);transform:rotate(3deg);box-shadow:0 6px 12px -7px rgba(58,50,44,.5)"></div>
+                <div style="position:absolute;inset:0;background:linear-gradient(160deg,#EFE0FF,#DCC8F8);transform:rotate(-5deg) translateY(-4px);box-shadow:0 6px 12px -7px rgba(58,50,44,.5)"><div style="position:absolute;top:-5px;left:50%;transform:translateX(-50%);width:26px;height:12px;background:rgba(255,255,255,.62)"></div></div>
+              </div>
+              <span style="font-size:11px;color:#8A7B6C">土</span>
+            </div>
+            <div style="grid-column:span 2;display:flex;flex-direction:column;align-items:center;gap:7px;width:100%">
+              <div style="width:100%;aspect-ratio:2/1;border-radius:12px;background:#E4573D;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 16px -8px rgba(228,87,61,.7)"><span style="font-size:15px;color:#fff;font-weight:700;letter-spacing:.06em">オープン</span></div>
+              <span style="font-size:11px;color:#E4573D;font-weight:700">日</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin:0 30px">
+          <h2 style="margin:0;font-size:26px;font-weight:900;line-height:1.55">週に一度のオープン</h2>
+          <p style="margin:16px 0 0;font-size:15px;line-height:1.95;color:#5C534C">書いたことづては日曜まで貼ったまま、その週ぶんがまとめて見れるようになります。</p>
+        </div>
+        </div>
+
+        <div style="position:absolute;left:30px;right:30px;bottom:56px;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;gap:7px"><div style="width:22px;height:6px;border-radius:99px;background:#E4573D"></div><div style="width:6px;height:6px;border-radius:99px;background:#D0C3AF"></div></div>
+          <div style="padding:0 26px;height:54px;background:#3A322C;border-radius:16px;display:flex;align-items:center"><span style="font-size:16px;font-weight:700;color:#fff">つぎへ</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ③-2 -->
+    <div data-screen-label="03b-onboarding" style="display:flex;flex-direction:column;gap:12px;width:390px">
+      <div style="display:flex;align-items:baseline;gap:9px"><span style="font:700 11px/1 ui-monospace,monospace;padding:4px 7px;background:#E4573D;color:#fff;border-radius:5px">③-2</span><span style="font-size:13.5px;font-weight:700">交換のしくみ</span><span style="font-size:11.5px;color:#8C8078">書く→オープン、を図で</span></div>
+      <div style="position:relative;width:390px;height:844px;border-radius:34px;overflow:hidden;background:#F7F2E9;box-shadow:0 20px 40px -18px rgba(58,50,44,.4)">
+        <div style="position:absolute;inset:0;background-image:radial-gradient(rgba(0,0,0,.05) 1px,transparent 1px);background-size:16px 16px"></div>
+        <div style="position:relative;display:flex;justify-content:space-between;align-items:center;padding:16px 26px 0;font-size:13px;font-weight:700"><span>9:41</span><div style="display:flex;gap:5px;align-items:center"><div style="width:16px;height:9px;border:1.5px solid #3A322C;border-radius:2px"></div><div style="width:22px;height:11px;border:1.5px solid #3A322C;border-radius:3px"></div></div></div>
+        <div style="position:relative;display:flex;justify-content:flex-end;padding:20px 26px 0"><span style="font-size:14px;color:#9A8E83">スキップ</span></div>
+
+        <div style="position:relative;margin:40px 26px 0;padding:28px 22px;background:rgba(255,255,255,.55);border-radius:22px;border:1.5px dashed rgba(58,50,44,.16);display:flex;flex-direction:column;gap:22px">
+          <div style="display:flex;align-items:center;gap:16px">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+              <div style="position:relative;width:96px;height:96px;background:linear-gradient(160deg,#FFE9A0,#FFDC72);transform:rotate(-4deg);box-shadow:0 7px 14px -8px rgba(58,50,44,.5)"><div style="position:absolute;top:-6px;left:50%;transform:translateX(-50%);width:36px;height:14px;background:rgba(255,255,255,.65)"></div><p style="margin:0;padding:20px 12px 0;font-family:'Klee One',serif;font-weight:600;font-size:11px;line-height:1.55;color:#4A3B2A">自分のことづて</p></div>
+              <span style="font-size:11px;color:#8A7B6C">じぶん</span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px">
+              <span style="font-size:22px;color:#E4573D">⇄</span>
+              <span style="font-family:'Klee One',serif;font-weight:600;font-size:12.5px;color:#E4573D">こうかん</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+              <div style="position:relative;width:96px;height:96px">
+                <div style="position:absolute;inset:0;background:#DCC8F8;contain:paint;filter:blur(6px);transform:rotate(4deg)"></div>
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><div style="width:26px;height:26px;border-radius:99px;background:rgba(255,255,255,.85);display:flex;align-items:center;justify-content:center"><div style="width:12px;height:10px;border-radius:2px;background:#6B6058;position:relative"><div style="position:absolute;left:3px;top:-6px;width:6px;height:6px;border:2px solid #6B6058;border-bottom:none;border-radius:99px 99px 0 0;box-sizing:border-box"></div></div></div></div>
+              </div>
+              <span style="font-size:11px;color:#8A7B6C">あいて</span>
+            </div>
+          </div>
+          <div style="height:1px;background:rgba(58,50,44,.12)"></div>
+          <div style="display:flex;align-items:center;gap:16px">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+              <div style="position:relative;width:96px;height:96px;background:linear-gradient(160deg,#FFE9A0,#FFDC72);transform:rotate(-4deg);box-shadow:0 7px 14px -8px rgba(58,50,44,.5)"><div style="position:absolute;top:-6px;left:50%;transform:translateX(-50%);width:36px;height:14px;background:rgba(255,255,255,.65)"></div><p style="margin:0;padding:20px 12px 0;font-family:'Klee One',serif;font-weight:600;font-size:11px;line-height:1.55;color:#4A3B2A">貼った！</p></div>
+              <span style="font-size:11px;color:#8A7B6C">じぶん</span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px">
+              <span style="font-size:22px;color:#E4573D">✧</span>
+              <span style="font-family:'Klee One',serif;font-weight:600;font-size:12.5px;color:#E4573D">オープン</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+              <div style="position:relative;width:96px;height:96px;background:linear-gradient(160deg,#EFE0FF,#DCC8F8);transform:rotate(4deg);box-shadow:0 7px 14px -8px rgba(58,50,44,.5)"><div style="position:absolute;top:-6px;right:12px;width:34px;height:14px;background:rgba(255,255,255,.65);transform:rotate(6deg)"></div><p style="margin:0;padding:20px 12px 0;font-family:'Klee One',serif;font-weight:600;font-size:11px;line-height:1.55;color:#43305C">相手のことづて</p></div>
+              <span style="font-size:11px;color:#8A7B6C">あいて</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="position:absolute;left:30px;right:30px;bottom:150px">
+          <h2 style="margin:0;font-size:26px;font-weight:900;line-height:1.55">ことづての交換</h2>
+          <p style="margin:16px 0 0;font-size:15px;line-height:1.95;color:#5C534C">自分が感謝のことづてを書くと、相手のことづても見れるようになります。</p>
+        </div>
+
+        <div style="position:absolute;left:30px;right:30px;bottom:56px;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;gap:7px"><div style="width:6px;height:6px;border-radius:99px;background:#D0C3AF"></div><div style="width:22px;height:6px;border-radius:99px;background:#E4573D"></div></div>
+          <div style="padding:0 26px;height:54px;background:#3A322C;border-radius:16px;display:flex;align-items:center"><span style="font-size:16px;font-weight:700;color:#fff">書いてみる</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ④ 最初の1枚 -->
+    <div data-screen-label="04-first-note" style="display:flex;flex-direction:column;gap:12px;width:390px">
+      <div style="display:flex;align-items:baseline;gap:9px"><span style="font:700 11px/1 ui-monospace,monospace;padding:4px 7px;background:#E4573D;color:#fff;border-radius:5px">④</span><span style="font-size:13.5px;font-weight:700">最初の1枚</span><span style="font-size:11.5px;color:#8C8078">招待より前。ヒントは1つだけ控えめに</span></div>
+      <div style="position:relative;width:390px;height:844px;border-radius:34px;overflow:hidden;background:#FFFCF6;box-shadow:0 20px 40px -18px rgba(58,50,44,.4)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 26px 0;font-size:13px;font-weight:700"><span>9:41</span><div style="display:flex;gap:5px;align-items:center"><div style="width:16px;height:9px;border:1.5px solid #3A322C;border-radius:2px"></div><div style="width:22px;height:11px;border:1.5px solid #3A322C;border-radius:3px"></div></div></div>
+
+        <div style="padding:36px 30px 0">
+          <h2 style="margin:0;font-size:25px;font-weight:900;line-height:1.55">はじめのことづて</h2>
+          <p style="margin:12px 0 0;font-size:14.5px;line-height:1.9;color:#6B6058">つながった相手が最初に見るのは、このことづてです。</p>
+        </div>
+
+        <div style="padding:30px 30px 0">
+          <div style="position:relative;width:330px;height:330px;background:linear-gradient(160deg,#D2EFE0,#B9E6D0);transform:rotate(1.5deg);box-shadow:0 16px 30px -14px rgba(58,50,44,.5)">
+            <div style="position:absolute;top:-13px;left:50%;transform:translateX(-50%) rotate(2deg);width:82px;height:27px;background:rgba(255,255,255,.62);box-shadow:0 1px 2px rgba(0,0,0,.09)"></div>
+            <div style="padding:46px 30px">
+              <p style="margin:0;font-family:'Klee One',serif;font-weight:600;font-size:20px;line-height:1.8;color:rgba(47,74,62,.45)">ここに、ひとこと</p>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:28px 30px 0;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:8px;align-self:flex-start;padding:9px 14px;background:#F4EEE2;border-radius:99px">
+            <span style="font-size:12.5px;color:#7A6F66">書くことに迷ったら</span><span style="font-size:10px;color:#A0958C">▾</span>
+          </div>
+          <p style="margin:0;font-family:'Klee One',serif;font-weight:600;font-size:14px;color:#A0958C;padding-left:4px">「最近ありがとうと思ったこと」</p>
+        </div>
+
+        <div style="position:absolute;left:24px;right:24px;bottom:34px">
+          <div style="display:flex;align-items:center;justify-content:center;height:60px;background:#E4573D;border-radius:18px;box-shadow:0 10px 20px -8px rgba(228,87,61,.7)"><span style="font-size:17px;font-weight:700;color:#fff;letter-spacing:.05em">壁に貼る</span></div>
+        </div>
+      </div>
+    </div>
+
+    
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+}
+</script>
+</body>
+</html>

@@ -7,6 +7,12 @@ bootstrap
 *.test
 *.out
 
+# 関数ディレクトリ直下の誤ビルド生成物（go build ./... 等でできるバイナリ）を防ぐ
+functions/*/*
+!functions/*/*.go
+!functions/*/go.mod
+!functions/*/go.sum
+
 # macOS
 .DS_Store
 
