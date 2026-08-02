@@ -1,0 +1,9 @@
+{
+  "body": "{\"body\": \"今日は美味しいご飯を作ってくれてありがとう\"}",
+  "httpMethod": "POST",
+  "path": "/kotozute",
+  "requestContext": {
+    "httpMethod": "POST",
+    "path": "/kotozute"
+  }
+}
