@@ -9,19 +9,32 @@
   - AWS SDK for Go v2（`config` / `dynamodb`）と `google/uuid` を依存に追加。
   - `pairID=p01` / `userID=k01` の固定値で `PutItem`。`SK` は `KOTOZUTE#<userID>#<ISO日時>#<uuid>`、`opened=false` で作成。
   - `sam local invoke` と `sam local start-api` の両方で、DynamoDB Local（`http://host.docker.internal:8000`）への書き込みを確認済み。バリデーションエラー（空 body / 不正 JSON）が 400 を返すことも確認済み。
+- **`GET /kotozute/this-week`（相互ロックの中心）が完成・動作確認済み。**
+  - `functions/get-this-week/` を新規作成（`post-kotozute`と同じ構成：独立した`go.mod`、`init()`で共有DynamoDBクライアント）。
+  - 相手の固定ユーザーIDとして`k02`を新設（`k01`と対。認証・ペア機能導入まわりの仮値）。
+  - `PAIR#p01/META`が未整備でも動くよう、`GetItem`結果が空ならコード内のデフォルト値（`lastOpenedAt`は遠い過去のsentinel、`openDayOfWeek`=5(金)、`openTime`=20:00、`timezone`=Asia/Tokyo）にフォールバックする設計。実データが入れば自動的にそちらへ切り替わる。
+  - DynamoDBクエリは`SK BETWEEN "KOTOZUTE#<userId>#<lastOpenedAt>" AND "KOTOZUTE#<userId>#￿"`のBETWEENトリックで、begins_withと範囲条件を同時に満たす。自分・相手それぞれ1回、計2回クエリしGo側で相互ロック判定。
+  - `openStatus`・`nextOpenAt`もCLAUDE.mdのレスポンス契約通りフル実装（`nextOpenAt`はPATCH /pair・バッチ未実装の現段階では近似値）。
+  - `canSeePartner=false`のときは`partnerKotozute`に一切触れない（詰めるコードパス自体に到達しない）設計で本文漏洩を構造的に回避。ユニットテストで本文が漏れないことを直接assert。
+  - CLAUDE.mdのロック表4パターン＋境界値（`lastOpenedAt`より前のアイテムが範囲外になること）を`sam local invoke`でDynamoDB Localに対して実地確認済み。
 
 ## プロジェクト構成（現状）
 ```
 kotozute/
 ├── template.yaml               # SAM。PostKotozuteFunction(POST /kotozute) を定義
 ├── functions/
-│   └── post-kotozute/
-│       ├── main.go             # POST /kotozute ハンドラ
+│   ├── post-kotozute/
+│   │   ├── main.go             # POST /kotozute ハンドラ
+│   │   ├── main_test.go
+│   │   └── go.mod / go.sum
+│   └── get-this-week/
+│       ├── main.go             # GET /kotozute/this-week ハンドラ
 │       ├── main_test.go
 │       └── go.mod / go.sum
 ├── events/
 │   ├── event.json              # (旧Hello World用、参考)
-│   └── post-kotozute.json      # sam local invoke 用サンプルイベント
+│   ├── post-kotozute.json      # sam local invoke 用サンプルイベント
+│   └── get-this-week.json      # sam local invoke 用サンプルイベント
 ├── scripts/
 │   ├── create-table.sh         # DynamoDB Local にメインテーブルを作成（ダミーキー）
 │   └── db-admin.sh             # dynamodb-admin（GUI）をダミーキーで起動
@@ -54,10 +67,12 @@ CLI からの操作は `scripts/` 配下のスクリプトを使う（両方ダ�
 # 1回だけの呼び出し確認
 sam build
 sam local invoke PostKotozuteFunction --event events/post-kotozute.json --env-vars env.json
+sam local invoke GetThisWeekFunction --event events/get-this-week.json --env-vars env.json
 
 # HTTPサーバとして立てて確認
 sam local start-api --env-vars env.json
 curl -X POST http://127.0.0.1:3000/kotozute -H 'Content-Type: application/json' -d '{"body":"ありがとう"}'
+curl http://127.0.0.1:3000/kotozute/this-week
 ```
 `env.json`（gitignore対象。各自ローカルに作成。関数が増えたらキーを追加する）:
 ```json
@@ -67,28 +82,32 @@ curl -X POST http://127.0.0.1:3000/kotozute -H 'Content-Type: application/json' 
     "AWS_ACCESS_KEY_ID": "local",
     "AWS_SECRET_ACCESS_KEY": "local",
     "AWS_REGION": "ap-northeast-1"
+  },
+  "GetThisWeekFunction": {
+    "DYNAMODB_ENDPOINT": "http://host.docker.internal:8000",
+    "AWS_ACCESS_KEY_ID": "local",
+    "AWS_SECRET_ACCESS_KEY": "local",
+    "AWS_REGION": "ap-northeast-1"
   }
 }
 ```
+`GET /kotozute/this-week`の相互ロックをローカルで確認する場合は、`aws dynamodb put-item`（ダミー認証情報つき）で`PAIR#p01`配下に`k01`/`k02`のことづてアイテムや`PAIR#p01/META`を投入してシナリオを作る（自分の枚数・相手の`opened`フラグの組み合わせを変えて`myKotozute`/`canSeePartner`/`partnerHasWritten`の出方を確認）。
 
 ## 次にやること（順序）
 
-### 1. GET /kotozute/this-week（相互ロックの中心）
-- CLAUDE.md の相互ロック判定・サイクル境界（lastOpenedAt）に従う。
-- まずは固定ユーザーで、自分の今週分・相手の今週分（opened絞り）・canSeePartner を返す。
-
-### 2. ユーザー／ペア／招待まわり
+### 1. ユーザー／ペア／招待まわり
 - `POST /users`, `GET /me`, 招待フロー（`POST /invites` → accept でペア成立、lastOpenedAt 初期化）。
+- これが実装されると `PAIR#p01/META` に実データが入り、`get-this-week` のデフォルト値フォールバックが自然に実データ経路へ切り替わる。相手の固定ID（`k02`）や`pairID`/`userID`の固定値も、この時点で置き換え対象になる。
 
-### 3. 認証（Cognito）を被せる
+### 2. 認証（Cognito）を被せる
 - Cognito ユーザープール作成（メール＋パスワード標準フロー）。
 - API Gateway に Cognito Authorizer。ハンドラ内で固定 userID を「トークンから取得」に差し替え。
 
-### 4. 週一オープンのバッチ
+### 3. 週一オープンのバッチ
 - GSI① を作成（テーブル作成コマンドに GSI 定義を追加）。
 - EventBridge Scheduler → Lambda。オープン処理＋通知の出し分け＋lastOpenedAt 更新。両者ゼロはスキップ。
 
-### 5. 通知（SNS→APNs）／アーカイブのページング
+### 4. 通知（SNS→APNs）／アーカイブのページング
 - APNs 設定、SNS 連携。`GET /kotozute/archive` のカーソルページング。
 
 ## 設計の出典

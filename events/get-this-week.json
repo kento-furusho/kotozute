@@ -1,0 +1,8 @@
+{
+  "httpMethod": "GET",
+  "path": "/kotozute/this-week",
+  "requestContext": {
+    "httpMethod": "GET",
+    "path": "/kotozute/this-week"
+  }
+}

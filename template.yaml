@@ -35,6 +35,29 @@ Resources:
         Variables:
           DYNAMODB_ENDPOINT: ""
 
+  GetThisWeekFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/get-this-week/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: kotozute
+      Events:
+        GetThisWeek:
+          Type: Api
+          Properties:
+            Path: /kotozute/this-week
+            Method: GET
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
 Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM
@@ -48,3 +71,9 @@ Outputs:
   PostKotozuteFunctionIamRole:
     Description: "Implicit IAM Role created for Post Kotozute function"
     Value: !GetAtt PostKotozuteFunctionRole.Arn
+  GetThisWeekFunction:
+    Description: "Get This Week Lambda Function ARN"
+    Value: !GetAtt GetThisWeekFunction.Arn
+  GetThisWeekFunctionIamRole:
+    Description: "Implicit IAM Role created for Get This Week function"
+    Value: !GetAtt GetThisWeekFunctionRole.Arn
