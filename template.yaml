@@ -12,6 +12,41 @@ Globals:
     MemorySize: 128
 
 Resources:
+  # Cognito ユーザープール（ユーザーの入れ物）。メール＋パスワードでログインできるようにする。
+  KotozuteUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: kotozute-users
+      # ユーザー名の代わりにメールアドレスでログインさせる。
+      UsernameAttributes:
+        - email
+      # サインアップ時にメール宛の確認コードで本人確認する（メールを自動で検証対象にする）。
+      AutoVerifiedAttributes:
+        - email
+      # パスワードの最低条件。学習段階なので緩め（8文字以上・小文字・数字）にしておく。
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireUppercase: false
+          RequireSymbols: false
+
+  # アプリクライアント（iOSアプリがこのユーザープールを使うための窓口）。
+  KotozuteUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: kotozute-ios
+      UserPoolId: !Ref KotozuteUserPool
+      # モバイルアプリ（公開クライアント）はシークレットを持てないので発行しない。
+      GenerateSecret: false
+      # 許可するログイン方式。SRP（安全なパスワード認証）＋リフレッシュトークン更新を許可。
+      # USER_PASSWORD_AUTH はCLIから動作確認するとき用（本番のiOSはSRPを使う）。
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
   PostKotozuteFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Metadata:
@@ -181,6 +216,14 @@ Resources:
           DYNAMODB_ENDPOINT: ""
 
 Outputs:
+  # iOSアプリの設定に必要な2つのID。デプロイ後、これらをiOS側に渡してCognitoログインを構成する。
+  UserPoolId:
+    Description: "Cognito User Pool ID"
+    Value: !Ref KotozuteUserPool
+  UserPoolClientId:
+    Description: "Cognito User Pool Client ID (iOS)"
+    Value: !Ref KotozuteUserPoolClient
+
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM
   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
