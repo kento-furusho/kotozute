@@ -58,6 +58,128 @@ Resources:
         Variables:
           DYNAMODB_ENDPOINT: ""
 
+  PostUsersFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/post-users/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+      Events:
+        PostUsers:
+          Type: Api
+          Properties:
+            Path: /users
+            Method: POST
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  GetMeFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/get-me/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: kotozute
+      Events:
+        GetMe:
+          Type: Api
+          Properties:
+            Path: /me
+            Method: GET
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  PostInvitesFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/post-invites/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+      Events:
+        PostInvites:
+          Type: Api
+          Properties:
+            Path: /invites
+            Method: POST
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  GetInviteFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/get-invite/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: kotozute
+      Events:
+        GetInvite:
+          Type: Api
+          Properties:
+            Path: /invites/{token}
+            Method: GET
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  PostInviteAcceptFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/post-invite-accept/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+        # DynamoDBCrudPolicyはTransactWriteItemsを含まないため個別に許可する（招待受諾はトランザクションで複数アイテムを同時更新するため）。
+        - Statement:
+            - Sid: AllowTransactWriteItems
+              Effect: Allow
+              Action:
+                - dynamodb:TransactWriteItems
+              Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/kotozute"
+      Events:
+        PostInviteAccept:
+          Type: Api
+          Properties:
+            Path: /invites/{token}/accept
+            Method: POST
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
 Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM
@@ -77,3 +199,33 @@ Outputs:
   GetThisWeekFunctionIamRole:
     Description: "Implicit IAM Role created for Get This Week function"
     Value: !GetAtt GetThisWeekFunctionRole.Arn
+  PostUsersFunction:
+    Description: "Post Users Lambda Function ARN"
+    Value: !GetAtt PostUsersFunction.Arn
+  PostUsersFunctionIamRole:
+    Description: "Implicit IAM Role created for Post Users function"
+    Value: !GetAtt PostUsersFunctionRole.Arn
+  GetMeFunction:
+    Description: "Get Me Lambda Function ARN"
+    Value: !GetAtt GetMeFunction.Arn
+  GetMeFunctionIamRole:
+    Description: "Implicit IAM Role created for Get Me function"
+    Value: !GetAtt GetMeFunctionRole.Arn
+  PostInvitesFunction:
+    Description: "Post Invites Lambda Function ARN"
+    Value: !GetAtt PostInvitesFunction.Arn
+  PostInvitesFunctionIamRole:
+    Description: "Implicit IAM Role created for Post Invites function"
+    Value: !GetAtt PostInvitesFunctionRole.Arn
+  GetInviteFunction:
+    Description: "Get Invite Lambda Function ARN"
+    Value: !GetAtt GetInviteFunction.Arn
+  GetInviteFunctionIamRole:
+    Description: "Implicit IAM Role created for Get Invite function"
+    Value: !GetAtt GetInviteFunctionRole.Arn
+  PostInviteAcceptFunction:
+    Description: "Post Invite Accept Lambda Function ARN"
+    Value: !GetAtt PostInviteAcceptFunction.Arn
+  PostInviteAcceptFunctionIamRole:
+    Description: "Implicit IAM Role created for Post Invite Accept function"
+    Value: !GetAtt PostInviteAcceptFunctionRole.Arn

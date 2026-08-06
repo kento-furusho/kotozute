@@ -1,0 +1,9 @@
+{
+  "body": "",
+  "httpMethod": "POST",
+  "path": "/invites",
+  "requestContext": {
+    "httpMethod": "POST",
+    "path": "/invites"
+  }
+}

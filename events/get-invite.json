@@ -1,0 +1,9 @@
+{
+  "httpMethod": "GET",
+  "path": "/invites/{token}",
+  "pathParameters": { "token": "REPLACE_WITH_REAL_TOKEN" },
+  "requestContext": {
+    "httpMethod": "GET",
+    "path": "/invites/{token}"
+  }
+}

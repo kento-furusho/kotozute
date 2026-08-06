@@ -1,0 +1,10 @@
+{
+  "body": "{\"displayName\": \"あい\"}",
+  "httpMethod": "POST",
+  "path": "/invites/{token}/accept",
+  "pathParameters": { "token": "REPLACE_WITH_REAL_TOKEN" },
+  "requestContext": {
+    "httpMethod": "POST",
+    "path": "/invites/{token}/accept"
+  }
+}

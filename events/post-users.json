@@ -1,0 +1,9 @@
+{
+  "body": "{\"displayName\": \"けんと\", \"email\": \"kento@example.com\"}",
+  "httpMethod": "POST",
+  "path": "/users",
+  "requestContext": {
+    "httpMethod": "POST",
+    "path": "/users"
+  }
+}
