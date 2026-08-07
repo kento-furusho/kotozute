@@ -6,8 +6,58 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
+
+func TestUserIDFromRequest(t *testing.T) {
+	// テーブルドリブンテスト：入力と期待値の組を表にして、同じ検証を全パターンに回す。
+	tests := []struct {
+		name       string
+		authorizer map[string]interface{}
+		wantID     string
+		wantOK     bool
+	}{
+		{
+			name:       "有効なclaimsからsubを取り出せる",
+			authorizer: map[string]interface{}{"claims": map[string]interface{}{"sub": "user-123"}},
+			wantID:     "user-123",
+			wantOK:     true,
+		},
+		{
+			name:       "authorizerが空なら失敗",
+			authorizer: map[string]interface{}{},
+			wantID:     "",
+			wantOK:     false,
+		},
+		{
+			name:       "claimsはあるがsubが無いなら失敗",
+			authorizer: map[string]interface{}{"claims": map[string]interface{}{"email": "a@example.com"}},
+			wantID:     "",
+			wantOK:     false,
+		},
+		{
+			name:       "subが空文字なら失敗",
+			authorizer: map[string]interface{}{"claims": map[string]interface{}{"sub": ""}},
+			wantID:     "",
+			wantOK:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := events.APIGatewayProxyRequest{
+				RequestContext: events.APIGatewayProxyRequestContext{
+					Authorizer: tt.authorizer,
+				},
+			}
+			gotID, gotOK := userIDFromRequest(request)
+			if gotID != tt.wantID || gotOK != tt.wantOK {
+				t.Errorf("userIDFromRequest() = (%q, %v), want (%q, %v)", gotID, gotOK, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}
 
 func TestBuildPairMetaFromItem(t *testing.T) {
 	t.Run("empty item returns defaults", func(t *testing.T) {

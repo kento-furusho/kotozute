@@ -20,10 +20,23 @@ import (
 
 const tableName = "kotozute"
 
-// 認証導入までは「自分」をk01に固定する。Cognito導入後、トークンから取得する形に差し替える。
-const fixedUserID = "k01"
-
 var dynamoClient *dynamodb.Client
+
+// userIDFromRequest はAPI Gatewayが検証済みのCognitoトークンから、ユーザーの一意なID（sub）を取り出す。
+// 門番（Cognito Authorizer）が認証を通したあと、トークンの中身（claims）を
+// request.RequestContext.Authorizer["claims"] に詰めてくれる。ここから "sub" を掘り出す。
+// トークンが無い/壊れている場合は ok=false を返し、呼び出し側が401にする。
+func userIDFromRequest(request events.APIGatewayProxyRequest) (string, bool) {
+	claims, ok := request.RequestContext.Authorizer["claims"].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	sub, ok := claims["sub"].(string)
+	if !ok || sub == "" {
+		return "", false
+	}
+	return sub, true
+}
 
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.Background())
@@ -55,10 +68,16 @@ type pairMeta struct {
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// トークンから「自分が誰か」を得る。ここが取れない＝正規の認証を通っていないので401。
+	userID, ok := userIDFromRequest(request)
+	if !ok {
+		return errorResponse(http.StatusUnauthorized, "unauthorized"), nil
+	}
+
 	userOut, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
 		Key: map[string]types.AttributeValue{
-			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", fixedUserID)},
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
 			"SK": &types.AttributeValueMemberS{Value: "META"},
 		},
 	})
@@ -70,7 +89,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	res := meResponse{
-		UserID:     fixedUserID,
+		UserID:     userID,
 		PairStatus: "none",
 	}
 	if v, ok := userOut.Item["displayName"].(*types.AttributeValueMemberS); ok {
