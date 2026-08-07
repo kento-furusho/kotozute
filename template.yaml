@@ -10,6 +10,13 @@ Globals:
   Function:
     Timeout: 5
     MemorySize: 128
+  Api:
+    Auth:
+      # Cognito の門番を「定義」する（まだどのエンドポイントにも割り当てていない）。
+      # UserPoolArn で「この User Pool が発行したトークンだけを本物と認める」門番になる。
+      Authorizers:
+        CognitoAuthorizer:
+          UserPoolArn: !GetAtt KotozuteUserPool.Arn
 
 Resources:
   # Cognito ユーザープール（ユーザーの入れ物）。メール＋パスワードでログインできるようにする。
@@ -135,6 +142,10 @@ Resources:
           Properties:
             Path: /me
             Method: GET
+            # このエンドポイントにだけ Cognito の門番を立たせる。
+            # トークンが無い/偽物なら API Gateway が 401 で弾き、Lambda は呼ばれない。
+            Auth:
+              Authorizer: CognitoAuthorizer
       Environment:
         Variables:
           DYNAMODB_ENDPOINT: ""
