@@ -3,6 +3,12 @@
   "path": "/kotozute/this-week",
   "requestContext": {
     "httpMethod": "GET",
-    "path": "/kotozute/this-week"
+    "path": "/kotozute/this-week",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
   }
 }

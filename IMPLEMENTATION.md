@@ -1,6 +1,6 @@
 # 実装状況と次のステップ
 
-## 現在地（2026-08-06 時点）
+## 現在地（2026-08-08 時点）
 - SAM プロジェクト初期化済み（Go / provided.al2023 / arm64）。
 - Git 初期化・リモート登録・初回コミット済み。`.gitignore` 設定済み（`.aws-sam/` 等を除外）。
 - DynamoDB Local を Docker で起動し、`scripts/create-table.sh` でメインテーブル `kotozute`（PK/SK）を作成済み。
@@ -24,6 +24,15 @@
   - `POST /invites/{token}/accept`は招待を受ける側を`k02`固定にし、`TransactWriteItems`で「INVITE状態をaccepted に更新（pending かつ未期限切れが条件）」「PAIR#p01/METAを新規作成（既存なら失敗）」「招待者のUSER METAにpairIdをセット（既にペア済みなら失敗）」「受諾者のUSER METAをpairId付きでPut（既存のemail/apnsTokenは引き継ぐ）」の4件を原子的に実行し、ペア成立を保証する。
   - **バグ修正の記録**：`ttl`はDynamoDBの予約語のため、ConditionExpression内で直接使うと`ValidationException`になる（`status`と同様に`#ttl`エイリアスが必要）。実装時に`sam local invoke`経由の500エラーから発見し、`aws dynamodb transact-write-items`で同じリクエストを直接再現して原因を特定した。
   - 動作確認：登録→招待発行→招待閲覧→受諾→`GET /me`でペア成立確認→`GET /kotozute/this-week`が実データの`PAIR#p01/META`を自然に使うようになることまで一気通貫で確認済み。二重登録・二重受諾・期限切れ・既にペア済みでの招待発行がそれぞれ409/404で弾かれることも確認済み。
+- **認証（Cognito）を全エンドポイントに導入済み。固定値 `k01`/`k02`/`p01` をコードから排除。**
+  - `template.yaml` に `AWS::Cognito::UserPool`（メール＋パスワード、確認コードで本人確認、パスワード8文字以上）と `AWS::Cognito::UserPoolClient`（iOS用・公開クライアント・SRP/USER_PASSWORD/REFRESH_TOKEN 許可）を追加。`Outputs` に `UserPoolId`/`UserPoolClientId`。
+  - `Globals.Api.Auth` に `CognitoAuthorizer`（`UserPoolArn` 指定）を定義し、エンドポイントごとに割り当て。`GET /invites/{token}` のみ公開（未登録の受諾者が「誰から」を見られる導線）、他はすべて認証必須。
+  - 各ハンドラに `userIDFromRequest`（`request.RequestContext.Authorizer["claims"]["sub"]` を型アサーションで取り出す）を追加。トークンが無い/壊れていれば401（API Gatewayの門番に加えた多層防御）。
+  - `pairID`・相手IDはクライアントから受け取らず、トークンの `userID` を起点に解決：`getUserPairID`（USER META の `pairId` を引く）、`partnerUserID`（PAIR META の member1/member2 から自分じゃない方を選ぶ純粋関数）。URLのIDを信用しない設計で他人のペアを構造的に覗けない。
+  - `POST /invites/{token}/accept` は受諾者を `sub` に、成立するペアIDを `uuid.NewString()` の新規発行に変更（p01固定を廃止。get-this-week/post-kotozute が USER META から pairId を引くため自動追従）。
+  - `post-kotozute` はチェック順を「認証→body検証→pairID解決(DB)」に整理（安い検証を先、DBアクセスを後）。ペア未成立は 409、`get-this-week` のペア未成立は空の今週状態を返す。
+  - ローカルテスト用イベントJSONに認証claims（`authorizer.claims.sub`）を追加。認証追加で前提が変わった既存テストを `authedRequest`/`withClaims` ヘルパー経由に修正し、「トークン無し→401」テストと `partnerUserID` のテーブルドリブンテストを追加。全関数 `go build`／`go test` 通過。
+  - **未確認**：`sam` がこの作業環境に無く、Cognito Authorizer はローカルでは検証されないため、実際の401挙動とデプロイ確認は未実施（ロジックのユニットテストとビルドのみ確認済み）。
 
 ### 重要な発見：`sam local invoke`/`start-api`はAWS認証情報系の環境変数を`--env-vars`で上書きできない
 `DYNAMODB_ENDPOINT`のような独自の環境変数は`env.json`の指定どおりコンテナに渡るが、`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`は「Lambda予約環境変数」としてSAM CLIが実行ホストの `~/.aws/credentials` の `default` プロファイルから自動的に注入し、`env.json`の値やコマンドラインの`--profile`指定を上書きする（実機のLambda実行環境がIAMロールの認証情報を自動注入し、ユーザーが上書きできないのと同じ挙動をローカルでも再現している）。
@@ -81,9 +90,9 @@ curl http://127.0.0.1:3000/kotozute/this-week
 
 ## 次にやること（順序）
 
-### 1. 認証（Cognito）を被せる
-- Cognito ユーザープール作成（メール＋パスワード標準フロー）。
-- API Gateway に Cognito Authorizer。各ハンドラ内の固定値（`fixedUserID=k01`, `fixedPartnerUserID=k02`, `fixedPairID=p01`）を「トークンから取得」「PAIR METAのmember1/member2から解決」する形に差し替える。
+### 1. 認証（Cognito）を被せる — ✅ 実装済み（デプロイ確認は残）
+- ユーザープール作成・Authorizer 割り当て・固定値のトークン起点への差し替えは完了（詳細は「現在地」参照）。
+- 残タスク：(a) `sam` のある環境でデプロイし、トークン無し→401・正規トークンで通ることを実地確認。(b) User Pool に `EmailConfiguration` を足して確認メールを SES 経由に切り替え（今は Cognito デフォルト送信・1日50通制限）。(c) iOS 側に `UserPoolId`/`UserPoolClientId` を渡してログインを構成。
 
 ### 2. 週一オープンのバッチ
 - GSI① を作成（`scripts/create-table.sh` に GSI 定義を追加）。

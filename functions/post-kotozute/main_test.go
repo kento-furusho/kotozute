@@ -9,8 +9,33 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 )
 
+// authedRequest は「Cognito認証を通ったリクエスト」を組み立てるテスト用ヘルパー。
+func authedRequest(body string) events.APIGatewayProxyRequest {
+	return events.APIGatewayProxyRequest{
+		Body: body,
+		RequestContext: events.APIGatewayProxyRequestContext{
+			Authorizer: map[string]interface{}{
+				"claims": map[string]interface{}{"sub": "k01"},
+			},
+		},
+	}
+}
+
+func TestHandler_Unauthorized(t *testing.T) {
+	// claims の無いリクエスト（トークン無し）は 401 で弾く。
+	request := events.APIGatewayProxyRequest{Body: `{"body": "ありがとう"}`}
+
+	response, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected status %d, got %d", http.StatusUnauthorized, response.StatusCode)
+	}
+}
+
 func TestHandler_InvalidJSON(t *testing.T) {
-	request := events.APIGatewayProxyRequest{Body: "not json"}
+	request := authedRequest("not json")
 
 	response, err := handler(context.Background(), request)
 	if err != nil {
@@ -22,7 +47,7 @@ func TestHandler_InvalidJSON(t *testing.T) {
 }
 
 func TestHandler_EmptyBody(t *testing.T) {
-	request := events.APIGatewayProxyRequest{Body: `{"body": ""}`}
+	request := authedRequest(`{"body": ""}`)
 
 	response, err := handler(context.Background(), request)
 	if err != nil {

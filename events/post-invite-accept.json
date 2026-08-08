@@ -5,6 +5,12 @@
   "pathParameters": { "token": "REPLACE_WITH_REAL_TOKEN" },
   "requestContext": {
     "httpMethod": "POST",
-    "path": "/invites/{token}/accept"
+    "path": "/invites/{token}/accept",
+    "authorizer": {
+      "claims": {
+        "sub": "k02",
+        "email": "ai@example.com"
+      }
+    }
   }
 }

@@ -4,6 +4,12 @@
   "path": "/invites",
   "requestContext": {
     "httpMethod": "POST",
-    "path": "/invites"
+    "path": "/invites",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
   }
 }

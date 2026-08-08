@@ -3,6 +3,12 @@
   "path": "/me",
   "requestContext": {
     "httpMethod": "GET",
-    "path": "/me"
+    "path": "/me",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
   }
 }
