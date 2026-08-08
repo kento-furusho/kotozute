@@ -1,0 +1,14 @@
+{
+  "httpMethod": "GET",
+  "path": "/pair",
+  "requestContext": {
+    "httpMethod": "GET",
+    "path": "/pair",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
+  }
+}
