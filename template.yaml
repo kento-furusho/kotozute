@@ -73,6 +73,8 @@ Resources:
           Properties:
             Path: /kotozute
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
       Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
         Variables:
           DYNAMODB_ENDPOINT: ""
@@ -119,6 +121,8 @@ Resources:
           Properties:
             Path: /users
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
       Environment:
         Variables:
           DYNAMODB_ENDPOINT: ""
@@ -169,6 +173,8 @@ Resources:
           Properties:
             Path: /invites
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
       Environment:
         Variables:
           DYNAMODB_ENDPOINT: ""

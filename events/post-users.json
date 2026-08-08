@@ -4,6 +4,12 @@
   "path": "/users",
   "requestContext": {
     "httpMethod": "POST",
-    "path": "/users"
+    "path": "/users",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
   }
 }

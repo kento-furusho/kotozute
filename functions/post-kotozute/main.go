@@ -19,11 +19,25 @@ import (
 
 const tableName = "kotozute"
 
-// 認証導入まではpairID/userIDを固定値にする。Cognito導入後、トークンから取得する形に差し替える。
+// pairID はまだ固定値。userID はトークンから取得するようになったが、
+// pairID の解決（USER META の pairId から引く）は次のステップで対応する。
 const fixedPairID = "p01"
-const fixedUserID = "k01"
 
 var dynamoClient *dynamodb.Client
+
+// userIDFromRequest はAPI Gatewayが検証済みのCognitoトークンから、ユーザーの一意なID（sub）を取り出す。
+// トークンが無い/壊れている場合は ok=false を返し、呼び出し側が401にする。
+func userIDFromRequest(request events.APIGatewayProxyRequest) (string, bool) {
+	claims, ok := request.RequestContext.Authorizer["claims"].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	sub, ok := claims["sub"].(string)
+	if !ok || sub == "" {
+		return "", false
+	}
+	return sub, true
+}
 
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.Background())
@@ -51,6 +65,12 @@ type kotozuteResponse struct {
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// ことづてを書くのはログイン済みの本人。トークンからそのユーザーIDを得る。
+	userID, ok := userIDFromRequest(request)
+	if !ok {
+		return errorResponse(http.StatusUnauthorized, "unauthorized"), nil
+	}
+
 	var req postKotozuteRequest
 	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
 		return errorResponse(http.StatusBadRequest, "invalid request body"), nil
@@ -64,7 +84,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 
 	item := map[string]types.AttributeValue{
 		"PK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", fixedPairID)},
-		"SK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#%s#%s", fixedUserID, createdAt, kotozuteID)},
+		"SK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#%s#%s", userID, createdAt, kotozuteID)},
 		"body":      &types.AttributeValueMemberS{Value: req.Body},
 		"opened":    &types.AttributeValueMemberBOOL{Value: false},
 		"createdAt": &types.AttributeValueMemberS{Value: createdAt},

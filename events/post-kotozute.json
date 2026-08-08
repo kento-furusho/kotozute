@@ -4,6 +4,12 @@
   "path": "/kotozute",
   "requestContext": {
     "httpMethod": "POST",
-    "path": "/kotozute"
+    "path": "/kotozute",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
   }
 }

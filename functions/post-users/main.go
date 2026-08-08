@@ -18,11 +18,21 @@ import (
 
 const tableName = "kotozute"
 
-// 認証導入までは「登録するユーザー」をk01に固定する。
-// Cognito導入後、サインアップ完了イベント（トークンのsub）から取得する形に差し替える。
-const fixedUserID = "k01"
-
 var dynamoClient *dynamodb.Client
+
+// userIDFromRequest はAPI Gatewayが検証済みのCognitoトークンから、ユーザーの一意なID（sub）を取り出す。
+// トークンが無い/壊れている場合は ok=false を返し、呼び出し側が401にする。
+func userIDFromRequest(request events.APIGatewayProxyRequest) (string, bool) {
+	claims, ok := request.RequestContext.Authorizer["claims"].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	sub, ok := claims["sub"].(string)
+	if !ok || sub == "" {
+		return "", false
+	}
+	return sub, true
+}
 
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.Background())
@@ -50,6 +60,12 @@ type userResponse struct {
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Cognitoでサインアップ・ログイン済みの本人だけが、自分のプロフィールを登録できる。
+	userID, ok := userIDFromRequest(request)
+	if !ok {
+		return errorResponse(http.StatusUnauthorized, "unauthorized"), nil
+	}
+
 	var req postUsersRequest
 	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
 		return errorResponse(http.StatusBadRequest, "invalid request body"), nil
@@ -59,7 +75,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	item := map[string]types.AttributeValue{
-		"PK":          &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", fixedUserID)},
+		"PK":          &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
 		"SK":          &types.AttributeValueMemberS{Value: "META"},
 		"displayName": &types.AttributeValueMemberS{Value: req.DisplayName},
 		"email":       &types.AttributeValueMemberS{Value: req.Email},
@@ -79,7 +95,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	resBody, err := json.Marshal(userResponse{
-		UserID:      fixedUserID,
+		UserID:      userID,
 		DisplayName: req.DisplayName,
 		Email:       req.Email,
 	})
