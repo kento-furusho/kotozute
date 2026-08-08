@@ -1,0 +1,44 @@
+name: CI
+
+# main への push と、main 向けの Pull Request で走らせる。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      # 各 Lambda 関数は独立した go.mod を持つため、functions 配下を1つずつ回す。
+      # gofmt（整形崩れ）・go vet（静的解析）・go build・go test をまとめて確認する。
+      - name: Build, vet and test each function module
+        run: |
+          set -euo pipefail
+          for dir in functions/*/; do
+            echo "::group::$dir"
+            pushd "$dir" >/dev/null
+
+            unformatted="$(gofmt -l .)"
+            if [ -n "$unformatted" ]; then
+              echo "gofmt が必要なファイルがあります:"
+              echo "$unformatted"
+              exit 1
+            fi
+
+            go vet ./...
+            go build ./...
+            go test ./...
+
+            popd >/dev/null
+            echo "::endgroup::"
+          done

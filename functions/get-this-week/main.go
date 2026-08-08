@@ -75,11 +75,11 @@ type kotozuteResponseItem struct {
 
 type thisWeekResponse struct {
 	MyKotozute        []kotozuteResponseItem `json:"myKotozute"`
-	OpenStatus        string                  `json:"openStatus"`
-	CanSeePartner     bool                    `json:"canSeePartner"`
-	PartnerKotozute   []kotozuteResponseItem  `json:"partnerKotozute,omitempty"`
-	PartnerHasWritten bool                    `json:"partnerHasWritten"`
-	NextOpenAt        string                  `json:"nextOpenAt"`
+	OpenStatus        string                 `json:"openStatus"`
+	CanSeePartner     bool                   `json:"canSeePartner"`
+	PartnerKotozute   []kotozuteResponseItem `json:"partnerKotozute,omitempty"`
+	PartnerHasWritten bool                   `json:"partnerHasWritten"`
+	NextOpenAt        string                 `json:"nextOpenAt"`
 }
 
 type pairMeta struct {
