@@ -219,6 +219,36 @@ func TestBuildPairMetaFromItem(t *testing.T) {
 	})
 }
 
+func TestPartnerUserID(t *testing.T) {
+	tests := []struct {
+		name     string
+		meta     pairMeta
+		myUserID string
+		want     string
+	}{
+		{
+			name:     "自分がmember1なら相手はmember2",
+			meta:     pairMeta{Member1: "k01", Member2: "k02"},
+			myUserID: "k01",
+			want:     "k02",
+		},
+		{
+			name:     "自分がmember2なら相手はmember1",
+			meta:     pairMeta{Member1: "k01", Member2: "k02"},
+			myUserID: "k02",
+			want:     "k01",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := partnerUserID(tt.meta, tt.myUserID); got != tt.want {
+				t.Errorf("partnerUserID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestComputeNextOpenAt(t *testing.T) {
 	meta := pairMeta{OpenDayOfWeek: 5, OpenTime: "20:00", Timezone: "Asia/Tokyo"} // 金曜20:00
 

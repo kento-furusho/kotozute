@@ -98,6 +98,8 @@ Resources:
           Properties:
             Path: /kotozute/this-week
             Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
       Environment:
         Variables:
           DYNAMODB_ENDPOINT: ""

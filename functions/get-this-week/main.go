@@ -20,14 +20,6 @@ import (
 
 const tableName = "kotozute"
 
-// 認証・ペア機能導入まではpairID/userID/相手IDを仮の固定値にする。
-// Cognito導入後、トークンから取得する形に差し替える。相手IDはPAIR METAのmember1/member2から解決する形に差し替える。
-const (
-	fixedPairID        = "p01"
-	fixedUserID        = "k01"
-	fixedPartnerUserID = "k02"
-)
-
 // PAIR META（PAIR#<id>/META）がまだ存在しない場合のデフォルト値。
 // lastOpenedAtは遠い過去のsentinelにし、「これまで書いた全部を今週扱い」にする。
 // POST /invites/accept 実装後、実データが書き込まれれば自然にそちらへ移行する。
@@ -39,6 +31,20 @@ const (
 )
 
 var dynamoClient *dynamodb.Client
+
+// userIDFromRequest はAPI Gatewayが検証済みのCognitoトークンから、ユーザーの一意なID（sub）を取り出す。
+// トークンが無い/壊れている場合は ok=false を返し、呼び出し側が401にする。
+func userIDFromRequest(request events.APIGatewayProxyRequest) (string, bool) {
+	claims, ok := request.RequestContext.Authorizer["claims"].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	sub, ok := claims["sub"].(string)
+	if !ok || sub == "" {
+		return "", false
+	}
+	return sub, true
+}
 
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.Background())
@@ -81,20 +87,46 @@ type pairMeta struct {
 	OpenDayOfWeek int
 	OpenTime      string
 	Timezone      string
+	Member1       string // ペアの片方のユーザーID
+	Member2       string // ペアのもう片方のユーザーID
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	meta, err := getPairMeta(ctx, fixedPairID)
+	// 1. トークンから「自分が誰か」を得る。
+	userID, ok := userIDFromRequest(request)
+	if !ok {
+		return errorResponse(http.StatusUnauthorized, "unauthorized"), nil
+	}
+
+	// 2. 自分の USER META から pairId を辿る。ペア未成立なら相手はいないので空の状態を返す。
+	//    クライアントから pairID を受け取らず、トークンのユーザーを起点に辿ることで他人のペアを覗けない。
+	pairID, err := getUserPairID(ctx, userID)
+	if err != nil {
+		return errorResponse(http.StatusInternalServerError, "failed to fetch user"), nil
+	}
+	if pairID == "" {
+		return okJSON(thisWeekResponse{
+			MyKotozute:        []kotozuteResponseItem{},
+			OpenStatus:        "before",
+			CanSeePartner:     false,
+			PartnerHasWritten: false,
+			NextOpenAt:        "",
+		})
+	}
+
+	// 3. PAIR META を読み、相手（自分じゃない方のメンバー）を特定する。
+	meta, err := getPairMeta(ctx, pairID)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to fetch pair"), nil
 	}
+	partnerID := partnerUserID(meta, userID)
 
-	myItems, err := queryKotozuteForUser(ctx, fixedPairID, fixedUserID, meta.LastOpenedAt)
+	// 4. 自分・相手それぞれの今週分ことづてを取得する。
+	myItems, err := queryKotozuteForUser(ctx, pairID, userID, meta.LastOpenedAt)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to fetch kotozute"), nil
 	}
-
-	partnerItems, err := queryKotozuteForUser(ctx, fixedPairID, fixedPartnerUserID, meta.LastOpenedAt)
+	partnerItems, err := queryKotozuteForUser(ctx, pairID, partnerID, meta.LastOpenedAt)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to fetch kotozute"), nil
 	}
@@ -104,13 +136,16 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return errorResponse(http.StatusInternalServerError, "failed to compute next open date"), nil
 	}
 
-	res := buildThisWeekResponse(myItems, partnerItems, nextOpenAt)
+	// 5. 相互ロック判定（純粋関数）でレスポンスを組み立てる。
+	return okJSON(buildThisWeekResponse(myItems, partnerItems, nextOpenAt))
+}
 
+// okJSON は thisWeekResponse を 200 のJSONレスポンスに変換する。
+func okJSON(res thisWeekResponse) (events.APIGatewayProxyResponse, error) {
 	resBody, err := json.Marshal(res)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to build response"), nil
 	}
-
 	return events.APIGatewayProxyResponse{
 		StatusCode: http.StatusOK,
 		Headers:    map[string]string{"Content-Type": "application/json"},
@@ -262,7 +297,40 @@ func buildPairMetaFromItem(item map[string]types.AttributeValue) pairMeta {
 	if v, ok := item["timezone"].(*types.AttributeValueMemberS); ok {
 		meta.Timezone = v.Value
 	}
+	if v, ok := item["member1"].(*types.AttributeValueMemberS); ok {
+		meta.Member1 = v.Value
+	}
+	if v, ok := item["member2"].(*types.AttributeValueMemberS); ok {
+		meta.Member2 = v.Value
+	}
 	return meta
+}
+
+// getUserPairID は USER#<userID>/META から pairId を読む。ペア未成立なら空文字を返す。
+func getUserPairID(ctx context.Context, userID string) (string, error) {
+	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
+			"SK": &types.AttributeValueMemberS{Value: "META"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if v, ok := out.Item["pairId"].(*types.AttributeValueMemberS); ok {
+		return v.Value, nil
+	}
+	return "", nil
+}
+
+// partnerUserID は「自分じゃない方のメンバー」を相手として返す。
+// pairID は自分の USER META から辿って得たものなので、自分は必ずこのペアの一員である。
+func partnerUserID(meta pairMeta, myUserID string) string {
+	if meta.Member1 == myUserID {
+		return meta.Member2
+	}
+	return meta.Member1
 }
 
 // computeNextOpenAt はmetaのopenDayOfWeek/openTime/timezoneから直近の次回オープン日時を算出する。
