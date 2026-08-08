@@ -11,8 +11,31 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
+// withClaims は「Cognito認証を通ったリクエスト」に仕立てるテスト用ヘルパー。
+func withClaims(request events.APIGatewayProxyRequest) events.APIGatewayProxyRequest {
+	request.RequestContext = events.APIGatewayProxyRequestContext{
+		Authorizer: map[string]interface{}{
+			"claims": map[string]interface{}{"sub": "k02"},
+		},
+	}
+	return request
+}
+
+func TestHandler_Unauthorized(t *testing.T) {
+	// claims の無いリクエスト（トークン無し）は 401 で弾く。
+	request := events.APIGatewayProxyRequest{PathParameters: map[string]string{"token": "sometoken"}}
+
+	response, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected status %d, got %d", http.StatusUnauthorized, response.StatusCode)
+	}
+}
+
 func TestHandler_MissingToken(t *testing.T) {
-	request := events.APIGatewayProxyRequest{PathParameters: map[string]string{}}
+	request := withClaims(events.APIGatewayProxyRequest{PathParameters: map[string]string{}})
 
 	response, err := handler(context.Background(), request)
 	if err != nil {
@@ -24,10 +47,10 @@ func TestHandler_MissingToken(t *testing.T) {
 }
 
 func TestHandler_InvalidJSONBody(t *testing.T) {
-	request := events.APIGatewayProxyRequest{
+	request := withClaims(events.APIGatewayProxyRequest{
 		PathParameters: map[string]string{"token": "sometoken"},
 		Body:           "not json",
-	}
+	})
 
 	response, err := handler(context.Background(), request)
 	if err != nil {

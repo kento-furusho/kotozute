@@ -16,16 +16,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/google/uuid"
 )
 
 const tableName = "kotozute"
-
-// 認証・ペア機能導入までは「招待を受ける人」「成立するペア」を固定値にする。
-// Cognito導入後、トークンから取得する形に差し替える。
-const (
-	fixedAcceptingUserID = "k02"
-	fixedPairID          = "p01"
-)
 
 // PAIR META新規作成時のデフォルト値。PATCH /pair実装後、成立後に変更できるようにする。
 const (
@@ -35,6 +29,20 @@ const (
 )
 
 var dynamoClient *dynamodb.Client
+
+// userIDFromRequest はAPI Gatewayが検証済みのCognitoトークンから、ユーザーの一意なID（sub）を取り出す。
+// トークンが無い/壊れている場合は ok=false を返し、呼び出し側が401にする。
+func userIDFromRequest(request events.APIGatewayProxyRequest) (string, bool) {
+	claims, ok := request.RequestContext.Authorizer["claims"].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	sub, ok := claims["sub"].(string)
+	if !ok || sub == "" {
+		return "", false
+	}
+	return sub, true
+}
 
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.Background())
@@ -59,6 +67,15 @@ type acceptResponse struct {
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// 受諾するのはログイン済みの本人。トークンからそのユーザーID（＝ペアのmember2）を得る。
+	accepterUserID, ok := userIDFromRequest(request)
+	if !ok {
+		return errorResponse(http.StatusUnauthorized, "unauthorized"), nil
+	}
+
+	// 成立するペアには一意なIDを新規発行する（p01固定をやめ、ペアごとに別のIDにする）。
+	pairID := uuid.NewString()
+
 	token := request.PathParameters["token"]
 	if token == "" {
 		return errorResponse(http.StatusBadRequest, "token is required"), nil
@@ -100,7 +117,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	if !ok {
 		return errorResponse(http.StatusInternalServerError, "invite is malformed"), nil
 	}
-	if inviterUserID.Value == fixedAcceptingUserID {
+	if inviterUserID.Value == accepterUserID {
 		return errorResponse(http.StatusBadRequest, "cannot accept your own invite"), nil
 	}
 
@@ -109,7 +126,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	acceptingUserOut, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
 		Key: map[string]types.AttributeValue{
-			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", fixedAcceptingUserID)},
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", accepterUserID)},
 			"SK": &types.AttributeValueMemberS{Value: "META"},
 		},
 	})
@@ -166,10 +183,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 				Put: &types.Put{
 					TableName: aws.String(tableName),
 					Item: map[string]types.AttributeValue{
-						"PK":            &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", fixedPairID)},
+						"PK":            &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
 						"SK":            &types.AttributeValueMemberS{Value: "META"},
 						"member1":       &types.AttributeValueMemberS{Value: inviterUserID.Value},
-						"member2":       &types.AttributeValueMemberS{Value: fixedAcceptingUserID},
+						"member2":       &types.AttributeValueMemberS{Value: accepterUserID},
 						"openDayOfWeek": &types.AttributeValueMemberN{Value: strconv.Itoa(defaultOpenDayOfWeek)},
 						"openTime":      &types.AttributeValueMemberS{Value: defaultOpenTime},
 						"timezone":      &types.AttributeValueMemberS{Value: defaultTimezone},
@@ -189,7 +206,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 					UpdateExpression:    aws.String("SET pairId = :pairId"),
 					ConditionExpression: aws.String("attribute_exists(PK) AND attribute_not_exists(pairId)"),
 					ExpressionAttributeValues: map[string]types.AttributeValue{
-						":pairId": &types.AttributeValueMemberS{Value: fixedPairID},
+						":pairId": &types.AttributeValueMemberS{Value: pairID},
 					},
 				},
 			},
@@ -197,12 +214,12 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 				Put: &types.Put{
 					TableName: aws.String(tableName),
 					Item: map[string]types.AttributeValue{
-						"PK":          &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", fixedAcceptingUserID)},
+						"PK":          &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", accepterUserID)},
 						"SK":          &types.AttributeValueMemberS{Value: "META"},
 						"displayName": &types.AttributeValueMemberS{Value: displayName},
 						"email":       &types.AttributeValueMemberS{Value: email},
 						"apnsToken":   &types.AttributeValueMemberS{Value: apnsToken},
-						"pairId":      &types.AttributeValueMemberS{Value: fixedPairID},
+						"pairId":      &types.AttributeValueMemberS{Value: pairID},
 					},
 					ConditionExpression: aws.String("attribute_not_exists(pairId)"),
 				},
@@ -217,7 +234,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return errorResponse(http.StatusInternalServerError, "failed to accept invite"), nil
 	}
 
-	resBody, err := json.Marshal(acceptResponse{PairID: fixedPairID})
+	resBody, err := json.Marshal(acceptResponse{PairID: pairID})
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to build response"), nil
 	}

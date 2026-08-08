@@ -230,6 +230,8 @@ Resources:
           Properties:
             Path: /invites/{token}/accept
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
       Environment:
         Variables:
           DYNAMODB_ENDPOINT: ""

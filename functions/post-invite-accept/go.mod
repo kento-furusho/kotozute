@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.43.4
 	github.com/aws/aws-sdk-go-v2/config v1.32.35
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.63.1
+	github.com/google/uuid v1.6.0
 )
 
 require (
