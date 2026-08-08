@@ -19,10 +19,6 @@ import (
 
 const tableName = "kotozute"
 
-// pairID はまだ固定値。userID はトークンから取得するようになったが、
-// pairID の解決（USER META の pairId から引く）は次のステップで対応する。
-const fixedPairID = "p01"
-
 var dynamoClient *dynamodb.Client
 
 // userIDFromRequest はAPI Gatewayが検証済みのCognitoトークンから、ユーザーの一意なID（sub）を取り出す。
@@ -37,6 +33,24 @@ func userIDFromRequest(request events.APIGatewayProxyRequest) (string, bool) {
 		return "", false
 	}
 	return sub, true
+}
+
+// getUserPairID は USER#<userID>/META から pairId を読む。ペア未成立なら空文字を返す。
+func getUserPairID(ctx context.Context, userID string) (string, error) {
+	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
+			"SK": &types.AttributeValueMemberS{Value: "META"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if v, ok := out.Item["pairId"].(*types.AttributeValueMemberS); ok {
+		return v.Value, nil
+	}
+	return "", nil
 }
 
 func init() {
@@ -71,6 +85,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return errorResponse(http.StatusUnauthorized, "unauthorized"), nil
 	}
 
+	// 先に安い入力チェックを済ませる（DBアクセスは最後まで遅らせる）。
 	var req postKotozuteRequest
 	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
 		return errorResponse(http.StatusBadRequest, "invalid request body"), nil
@@ -79,11 +94,20 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return errorResponse(http.StatusBadRequest, "body is required"), nil
 	}
 
+	// ことづては自分のペアの中に書く。ペア未成立なら書き込み先が無いので弾く。
+	pairID, err := getUserPairID(ctx, userID)
+	if err != nil {
+		return errorResponse(http.StatusInternalServerError, "failed to fetch user"), nil
+	}
+	if pairID == "" {
+		return errorResponse(http.StatusConflict, "user is not paired yet"), nil
+	}
+
 	createdAt := time.Now().UTC().Format(time.RFC3339)
 	kotozuteID := uuid.NewString()
 
 	item := map[string]types.AttributeValue{
-		"PK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", fixedPairID)},
+		"PK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
 		"SK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#%s#%s", userID, createdAt, kotozuteID)},
 		"body":      &types.AttributeValueMemberS{Value: req.Body},
 		"opened":    &types.AttributeValueMemberBOOL{Value: false},
