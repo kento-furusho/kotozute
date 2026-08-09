@@ -156,6 +156,31 @@ Resources:
         Variables:
           DYNAMODB_ENDPOINT: ""
 
+  PatchMeFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/patch-me/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+      Events:
+        PatchMe:
+          Type: Api
+          Properties:
+            Path: /me
+            Method: PATCH
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
   GetPairFunction:
     Type: AWS::Serverless::Function
     Metadata:
