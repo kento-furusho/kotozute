@@ -1,6 +1,6 @@
 # 実装状況と次のステップ
 
-## 現在地（2026-08-08 時点）
+## 現在地（2026-08-10 時点）
 - SAM プロジェクト初期化済み（Go / provided.al2023 / arm64）。
 - Git 初期化・リモート登録・初回コミット済み。`.gitignore` 設定済み（`.aws-sam/` 等を除外）。
 - DynamoDB Local を Docker で起動し、`scripts/create-table.sh` でメインテーブル `kotozute`（PK/SK）を作成済み。
@@ -33,6 +33,14 @@
   - `post-kotozute` はチェック順を「認証→body検証→pairID解決(DB)」に整理（安い検証を先、DBアクセスを後）。ペア未成立は 409、`get-this-week` のペア未成立は空の今週状態を返す。
   - ローカルテスト用イベントJSONに認証claims（`authorizer.claims.sub`）を追加。認証追加で前提が変わった既存テストを `authedRequest`/`withClaims` ヘルパー経由に修正し、「トークン無し→401」テストと `partnerUserID` のテーブルドリブンテストを追加。全関数 `go build`／`go test` 通過。
   - **未確認**：`sam` がこの作業環境に無く、Cognito Authorizer はローカルでは検証されないため、実際の401挙動とデプロイ確認は未実施（ロジックのユニットテストとビルドのみ確認済み）。
+- **残りAPI 5本を実装し、CLAUDE.md のエンドポイント一覧12本がすべて実装済みに。**
+  - `GET /pair`（get-pair）：トークン→pairID→PAIR META を辿り、相手の userId/displayName・オープン設定・status・nextOpenAt を返す。相手の表示名は相手の USER META から取得。ペア未成立は404。
+  - `PATCH /me`（patch-me）：表示名・APNsトークンの部分更新。`*string` で「未指定(nil)」と「空文字」を区別し、送られた項目だけ `UpdateExpression` に組み立てる（buildUpdateExpression）。`attribute_exists(PK)` で未登録は404（UpdateItem の upsert 抑止）。
+  - `PATCH /pair`（patch-pair）：オープン曜日(0-6)・時刻(HH:MM 2桁)・タイムゾーン(time.LoadLocation で実在確認)を検証してから部分更新。不正値は DB 前に400。
+  - `PATCH /kotozute/{id}`（patch-kotozute）：URLの id だけでは完全なSKを作れないため `begins_with(SK, "KOTOZUTE#<自分>#")` で検索し末尾idが一致する1件を特定。opened=true は編集不可(409)、本文のみ SET、`ConditionExpression opened=false` で検索と更新の間のオープン競合を防御。検索プレフィックスに自分のuserIDを埋めるため他人のことづては構造的に対象外。
+  - `GET /kotozute/archive`（get-archive）：月ごと（year/month）のカーソルページング。`Limit`＋`ExclusiveStartKey`/`LastEvaluatedKey` を Base64 で不透明化して cursor 化（encodeCursor/decodeCursor、round-trip テスト済み）。whose=partner は FilterExpression opened=true のみ（過去ロックの緩和）。続きが無ければ nextCursor は null。
+  - いずれも既存の認証パターン（userIDFromRequest・トークン起点の pairID/相手解決）を踏襲し、CognitoAuthorizer を適用。純粋関数（buildUpdateExpression/buildPairUpdate/parseArchiveQuery/encodeCursor 等）に切り出してテーブルドリブンでテスト。全12関数 `gofmt`/`go vet`/`go build`/`go test` 通過。
+- **CI（GitHub Actions）を追加。** `.github/workflows/ci.yml` で main への push / PR 時に、関数ごとに gofmt・go vet・go build・go test を実行。
 
 ### 重要な発見：`sam local invoke`/`start-api`はAWS認証情報系の環境変数を`--env-vars`で上書きできない
 `DYNAMODB_ENDPOINT`のような独自の環境変数は`env.json`の指定どおりコンテナに渡るが、`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`は「Lambda予約環境変数」としてSAM CLIが実行ホストの `~/.aws/credentials` の `default` プロファイルから自動的に注入し、`env.json`の値やコマンドラインの`--profile`指定を上書きする（実機のLambda実行環境がIAMロールの認証情報を自動注入し、ユーザーが上書きできないのと同じ挙動をローカルでも再現している）。
@@ -44,17 +52,23 @@
 ## プロジェクト構成（現状）
 ```
 kotozute/
-├── template.yaml               # SAM。8関数を定義
+├── template.yaml               # SAM。Cognito(UserPool/Client) + 12関数 + Authorizer を定義
+├── .github/workflows/ci.yml    # CI：関数ごとに gofmt/vet/build/test
 ├── functions/
-│   ├── post-kotozute/          # POST /kotozute
-│   ├── get-this-week/          # GET /kotozute/this-week
 │   ├── post-users/             # POST /users
 │   ├── get-me/                 # GET /me
+│   ├── patch-me/               # PATCH /me
 │   ├── post-invites/           # POST /invites
-│   ├── get-invite/             # GET /invites/{token}
-│   └── post-invite-accept/     # POST /invites/{token}/accept
+│   ├── get-invite/             # GET /invites/{token}（公開）
+│   ├── post-invite-accept/     # POST /invites/{token}/accept
+│   ├── get-pair/               # GET /pair
+│   ├── patch-pair/             # PATCH /pair
+│   ├── post-kotozute/          # POST /kotozute
+│   ├── get-this-week/          # GET /kotozute/this-week
+│   ├── patch-kotozute/         # PATCH /kotozute/{id}
+│   └── get-archive/            # GET /kotozute/archive
 │       （各ディレクトリに main.go / main_test.go / go.mod / go.sum）
-├── events/                     # sam local invoke 用サンプルイベント（関数ごと）
+├── events/                     # sam local invoke 用サンプルイベント（関数ごと・認証claims入り）
 ├── scripts/
 │   ├── create-table.sh         # DynamoDB Local にメインテーブルを作成（ダミーキー、CLI直接用）
 │   └── db-admin.sh             # dynamodb-admin（GUI）をダミーキーで起動（CLI直接用）
@@ -94,13 +108,18 @@ curl http://127.0.0.1:3000/kotozute/this-week
 - ユーザープール作成・Authorizer 割り当て・固定値のトークン起点への差し替えは完了（詳細は「現在地」参照）。
 - 残タスク：(a) `sam` のある環境でデプロイし、トークン無し→401・正規トークンで通ることを実地確認。(b) User Pool に `EmailConfiguration` を足して確認メールを SES 経由に切り替え（今は Cognito デフォルト送信・1日50通制限）。(c) iOS 側に `UserPoolId`/`UserPoolClientId` を渡してログインを構成。
 
-### 2. 週一オープンのバッチ
-- GSI① を作成（`scripts/create-table.sh` に GSI 定義を追加）。
-- EventBridge Scheduler → Lambda。オープン処理＋通知の出し分け＋lastOpenedAt 更新。両者ゼロはスキップ。
+### 2. 残りのAPI（PATCH系・GET /pair・アーカイブ） — ✅ 実装済み
+- `PATCH /me`・`GET /pair`・`PATCH /pair`・`PATCH /kotozute/{id}`・`GET /kotozute/archive` を実装済み（詳細は「現在地」参照）。これで API は全12本が揃った。
+- 残タスク：デプロイ後の実地確認（認証まわりと同様、`sam` のある環境で）。
 
-### 3. 通知（SNS→APNs）／アーカイブのページング／PATCH系
-- APNs 設定、SNS 連携。`GET /kotozute/archive` のカーソルページング。
-- `PATCH /me`（表示名・APNsトークン更新）、`PATCH /kotozute/{id}`（編集）、`GET /pair`・`PATCH /pair`（オープン曜日・時刻の変更）も未実装。
+### 3. 週一オープンのバッチ ← 次の本命
+- GSI① を作成（`scripts/create-table.sh` に GSI 定義を追加。`template.yaml` のテーブル定義側にも要追加）。
+- EventBridge Scheduler → Lambda。オープン処理＋通知の出し分け＋lastOpenedAt 更新。両者ゼロはスキップ。二重オープン防止（lastOpenedAt を見て1サイクル未経過ならスキップ）。
+- API とは毛色が違う「時刻起動の Lambda」。まず 1〜4（GSI・器・対象検索・オープン処理）を DB 完結で作り、通知(SNS→APNs) は後半。
+
+### 4. 通知（SNS→APNs）／本番デプロイまわり
+- APNs 設定、SNS 連携。通知の出し分け（書いた人／書いてない人／両者ゼロは無言）。
+- User Pool の確認メールを SES 経由に切り替え、iOS へ UserPoolId/ClientId を渡す。
 
 ## 設計の出典
 全仕様は Notion「ことづて」設計ドキュメント（開発ページ配下）にある。矛盾があれば Notion を正とする。主要点は CLAUDE.md に転記済み。
