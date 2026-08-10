@@ -87,6 +87,53 @@ func TestParseHHMM(t *testing.T) {
 	}
 }
 
+func TestSomeoneWrote(t *testing.T) {
+	sks := []string{
+		"KOTOZUTE#k01#2026-08-07T10:00:00Z#a",
+		"KOTOZUTE#k01#2026-08-07T11:00:00Z#b",
+	}
+	if !someoneWrote(sks, "k01") {
+		t.Error("k01 should have written")
+	}
+	if someoneWrote(sks, "k02") {
+		t.Error("k02 should not have written")
+	}
+}
+
+func TestBuildNotifications(t *testing.T) {
+	pair := pairMeta{Member1: "k01", Member2: "k02"}
+
+	t.Run("両者ゼロは通知しない", func(t *testing.T) {
+		if got := buildNotifications(pair, false, false, "けんと", "あい"); got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("片方だけ書いた", func(t *testing.T) {
+		got := buildNotifications(pair, true, false, "けんと", "あい")
+		if len(got) != 2 {
+			t.Fatalf("expected 2 notifications, got %d", len(got))
+		}
+		// member1（書いた）→ オープン通知
+		if got[0].UserID != "k01" || got[0].Message != "今週のことづて、オープンしました" {
+			t.Errorf("member1 notification wrong: %+v", got[0])
+		}
+		// member2（書いてない）→ 相手（けんと）の名前入りの促し
+		if got[1].UserID != "k02" || got[1].Message != "あなたが1つ書くと、けんとのことづても見られます" {
+			t.Errorf("member2 notification wrong: %+v", got[1])
+		}
+	})
+
+	t.Run("両者書いた", func(t *testing.T) {
+		got := buildNotifications(pair, true, true, "けんと", "あい")
+		for _, n := range got {
+			if n.Message != "今週のことづて、オープンしました" {
+				t.Errorf("expected open message, got %q", n.Message)
+			}
+		}
+	})
+}
+
 func TestBuildPairMeta(t *testing.T) {
 	item := map[string]types.AttributeValue{
 		"PK":            &types.AttributeValueMemberS{Value: "PAIR#p01"},

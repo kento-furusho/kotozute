@@ -377,6 +377,13 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: kotozute
+        # 通知は SNS→APNs。ユーザーのエンドポイントARNへ Publish する権限。
+        - Statement:
+            - Sid: AllowSNSPublish
+              Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: "*"
       Events:
         HourlySchedule:
           Type: Schedule

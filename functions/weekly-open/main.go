@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
 )
 
 const tableName = "kotozute"
@@ -24,7 +25,10 @@ const tableName = "kotozute"
 // マルチタイムゾーン対応は将来課題。実際のオープン可否は各ペアの timezone で再判定する。
 const referenceTimezone = "Asia/Tokyo"
 
-var dynamoClient *dynamodb.Client
+var (
+	dynamoClient *dynamodb.Client
+	snsClient    *sns.Client
+)
 
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.Background())
@@ -38,6 +42,13 @@ func init() {
 			o.BaseEndpoint = aws.String(endpoint)
 		}
 	})
+	snsClient = sns.NewFromConfig(cfg)
+}
+
+// notification は「誰に」「どんな文面を」送るか。
+type notification struct {
+	UserID  string
+	Message string
 }
 
 type pairMeta struct {
@@ -185,17 +196,86 @@ func buildPairMeta(item map[string]types.AttributeValue) pairMeta {
 func openPair(ctx context.Context, pair pairMeta, now time.Time) error {
 	nowStr := now.UTC().Format(time.RFC3339)
 
+	// このサイクル分の未オープンことづて。SK に「書いた人」が入っているので、
+	// オープン前にここから「誰が書いたか」を割り出せる。
 	sks, err := queryCycleKotozuteSKs(ctx, pair)
 	if err != nil {
 		return err
 	}
+	wroteMember1 := someoneWrote(sks, pair.Member1)
+	wroteMember2 := someoneWrote(sks, pair.Member2)
+
 	for _, sk := range sks {
 		if err := markOpened(ctx, pair.PairID, sk, nowStr); err != nil {
 			return err
 		}
 	}
+	if err := updateLastOpenedAt(ctx, pair.PairID, nowStr); err != nil {
+		return err
+	}
 
-	return updateLastOpenedAt(ctx, pair.PairID, nowStr)
+	// 通知の出し分け。両者ゼロの週は buildNotifications が空を返すので誰にも送らない。
+	name1 := getUserDisplayName(ctx, pair.Member1)
+	name2 := getUserDisplayName(ctx, pair.Member2)
+	for _, n := range buildNotifications(pair, wroteMember1, wroteMember2, name1, name2) {
+		if err := sendNotification(ctx, n); err != nil {
+			// 通知失敗はオープン自体の成否と切り離す（ログのみ）。
+			log.Printf("failed to notify user %s: %v", n.UserID, err)
+		}
+	}
+	return nil
+}
+
+// someoneWrote は SK 群の中に、その userID が書いたことづてがあるかを返す。
+// SK は "KOTOZUTE#<書いた人>#..." なので、プレフィックスで判定できる純粋関数。
+func someoneWrote(sks []string, userID string) bool {
+	prefix := fmt.Sprintf("KOTOZUTE#%s#", userID)
+	for _, sk := range sks {
+		if strings.HasPrefix(sk, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildNotifications は通知の出し分けを決める純粋関数。
+// - 両者ゼロ（誰も書いていない）→ 通知しない（空）
+// - 書いた人 → 「今週のことづて、オープンしました」
+// - 書いてない人 → 「あなたが1つ書くと、○○のことづても見られます」（催促でなく事実）
+func buildNotifications(pair pairMeta, wroteMember1, wroteMember2 bool, name1, name2 string) []notification {
+	if !wroteMember1 && !wroteMember2 {
+		return nil
+	}
+	return []notification{
+		notificationFor(pair.Member1, wroteMember1, name2), // member1 の相手は member2
+		notificationFor(pair.Member2, wroteMember2, name1),
+	}
+}
+
+func notificationFor(userID string, wrote bool, partnerName string) notification {
+	if wrote {
+		return notification{UserID: userID, Message: "今週のことづて、オープンしました"}
+	}
+	if partnerName == "" {
+		partnerName = "相手"
+	}
+	return notification{UserID: userID, Message: fmt.Sprintf("あなたが1つ書くと、%sのことづても見られます", partnerName)}
+}
+
+// sendNotification は SNS 経由で1件通知する。
+// ユーザーの SNS エンドポイントARN（USER META の snsEndpointArn）が未登録なら、
+// 送信先が無いのでログだけ残してスキップする（APNsエンドポイント登録は別タスク）。
+func sendNotification(ctx context.Context, n notification) error {
+	arn := getUserSNSEndpoint(ctx, n.UserID)
+	if arn == "" {
+		log.Printf("no SNS endpoint for user %s; skip. message=%q", n.UserID, n.Message)
+		return nil
+	}
+	_, err := snsClient.Publish(ctx, &sns.PublishInput{
+		TargetArn: aws.String(arn),
+		Message:   aws.String(n.Message),
+	})
+	return err
 }
 
 // queryCycleKotozuteSKs はこのサイクル（lastOpenedAt 以降）の未オープンことづての SK を集める。
@@ -257,6 +337,32 @@ func markOpened(ctx context.Context, pairID, sk, nowStr string) error {
 		return err
 	}
 	return nil
+}
+
+func getUserDisplayName(ctx context.Context, userID string) string {
+	return getUserAttr(ctx, userID, "displayName")
+}
+
+func getUserSNSEndpoint(ctx context.Context, userID string) string {
+	return getUserAttr(ctx, userID, "snsEndpointArn")
+}
+
+// getUserAttr は USER#<userID>/META の指定した文字列属性を読む。無ければ空文字。
+func getUserAttr(ctx context.Context, userID, attr string) string {
+	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
+			"SK": &types.AttributeValueMemberS{Value: "META"},
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	if v, ok := out.Item[attr].(*types.AttributeValueMemberS); ok {
+		return v.Value
+	}
+	return ""
 }
 
 func updateLastOpenedAt(ctx context.Context, pairID, nowStr string) error {
