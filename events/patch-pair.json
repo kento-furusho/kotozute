@@ -1,0 +1,15 @@
+{
+  "body": "{\"openDayOfWeek\": 3, \"openTime\": \"21:30\"}",
+  "httpMethod": "PATCH",
+  "path": "/pair",
+  "requestContext": {
+    "httpMethod": "PATCH",
+    "path": "/pair",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
+  }
+}

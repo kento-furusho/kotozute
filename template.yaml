@@ -79,6 +79,31 @@ Resources:
         Variables:
           DYNAMODB_ENDPOINT: ""
 
+  GetArchiveFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/get-archive/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: kotozute
+      Events:
+        GetArchive:
+          Type: Api
+          Properties:
+            Path: /kotozute/archive
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
   GetThisWeekFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -150,6 +175,106 @@ Resources:
             Method: GET
             # このエンドポイントにだけ Cognito の門番を立たせる。
             # トークンが無い/偽物なら API Gateway が 401 で弾き、Lambda は呼ばれない。
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  PatchKotozuteFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/patch-kotozute/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+      Events:
+        PatchKotozute:
+          Type: Api
+          Properties:
+            Path: /kotozute/{id}
+            Method: PATCH
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  PatchMeFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/patch-me/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+      Events:
+        PatchMe:
+          Type: Api
+          Properties:
+            Path: /me
+            Method: PATCH
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  PatchPairFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/patch-pair/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+      Events:
+        PatchPair:
+          Type: Api
+          Properties:
+            Path: /pair
+            Method: PATCH
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  GetPairFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/get-pair/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: kotozute
+      Events:
+        GetPair:
+          Type: Api
+          Properties:
+            Path: /pair
+            Method: GET
             Auth:
               Authorizer: CognitoAuthorizer
       Environment:

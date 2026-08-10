@@ -1,0 +1,16 @@
+{
+  "body": "{\"body\": \"やっぱりこう書き直したい\"}",
+  "httpMethod": "PATCH",
+  "path": "/kotozute/{id}",
+  "pathParameters": { "id": "REPLACE_WITH_REAL_KOTOZUTE_ID" },
+  "requestContext": {
+    "httpMethod": "PATCH",
+    "path": "/kotozute/{id}",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
+  }
+}

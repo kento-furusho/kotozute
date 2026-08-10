@@ -1,0 +1,15 @@
+{
+  "body": "{\"displayName\": \"けんと改\"}",
+  "httpMethod": "PATCH",
+  "path": "/me",
+  "requestContext": {
+    "httpMethod": "PATCH",
+    "path": "/me",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
+  }
+}
