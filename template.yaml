@@ -361,6 +361,35 @@ Resources:
         Variables:
           DYNAMODB_ENDPOINT: ""
 
+  # 週一オープンのバッチ。EventBridge が定期起動する（API Gateway からは呼ばれない）。
+  WeeklyOpenFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/weekly-open/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      # 一括更新でやや時間がかかりうるので、API 関数より長めのタイムアウトにする。
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+      Events:
+        HourlySchedule:
+          Type: Schedule
+          Properties:
+            # 毎正時に起動し、その時刻にオープンすべきペアを探す。
+            # 二重オープン防止（lastOpenedAt 判定）があるため、毎時走っても1サイクル1回に収まる。
+            Schedule: cron(0 * * * ? *)
+            Name: kotozute-weekly-open-hourly
+            Description: "kotozute weekly open batch (hourly)"
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
 Outputs:
   # iOSアプリの設定に必要な2つのID。デプロイ後、これらをiOS側に渡してCognitoログインを構成する。
   UserPoolId:
