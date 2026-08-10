@@ -1,0 +1,20 @@
+{
+  "httpMethod": "GET",
+  "path": "/kotozute/archive",
+  "queryStringParameters": {
+    "whose": "me",
+    "year": "2026",
+    "month": "8",
+    "limit": "10"
+  },
+  "requestContext": {
+    "httpMethod": "GET",
+    "path": "/kotozute/archive",
+    "authorizer": {
+      "claims": {
+        "sub": "k01",
+        "email": "kento@example.com"
+      }
+    }
+  }
+}

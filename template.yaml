@@ -79,6 +79,31 @@ Resources:
         Variables:
           DYNAMODB_ENDPOINT: ""
 
+  GetArchiveFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/get-archive/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: kotozute
+      Events:
+        GetArchive:
+          Type: Api
+          Properties:
+            Path: /kotozute/archive
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
   GetThisWeekFunction:
     Type: AWS::Serverless::Function
     Metadata:
