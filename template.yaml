@@ -156,6 +156,31 @@ Resources:
         Variables:
           DYNAMODB_ENDPOINT: ""
 
+  PatchKotozuteFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/patch-kotozute/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+      Events:
+        PatchKotozute:
+          Type: Api
+          Properties:
+            Path: /kotozute/{id}
+            Method: PATCH
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
   PatchMeFunction:
     Type: AWS::Serverless::Function
     Metadata:
