@@ -1,6 +1,6 @@
 # 実装状況と次のステップ
 
-## 現在地（2026-08-10 時点）
+## 現在地（2026-08-10 時点・その2）
 - SAM プロジェクト初期化済み（Go / provided.al2023 / arm64）。
 - Git 初期化・リモート登録・初回コミット済み。`.gitignore` 設定済み（`.aws-sam/` 等を除外）。
 - DynamoDB Local を Docker で起動し、`scripts/create-table.sh` でメインテーブル `kotozute`（PK/SK）を作成済み。
@@ -41,6 +41,14 @@
   - `GET /kotozute/archive`（get-archive）：月ごと（year/month）のカーソルページング。`Limit`＋`ExclusiveStartKey`/`LastEvaluatedKey` を Base64 で不透明化して cursor 化（encodeCursor/decodeCursor、round-trip テスト済み）。whose=partner は FilterExpression opened=true のみ（過去ロックの緩和）。続きが無ければ nextCursor は null。
   - いずれも既存の認証パターン（userIDFromRequest・トークン起点の pairID/相手解決）を踏襲し、CognitoAuthorizer を適用。純粋関数（buildUpdateExpression/buildPairUpdate/parseArchiveQuery/encodeCursor 等）に切り出してテーブルドリブンでテスト。全12関数 `gofmt`/`go vet`/`go build`/`go test` 通過。
 - **CI（GitHub Actions）を追加。** `.github/workflows/ci.yml` で main への push / PR 時に、関数ごとに gofmt・go vet・go build・go test を実行。
+- **週一オープンのバッチ（weekly-open）を実装。**
+  - GSI①（GSI1: PK=openDayOfWeek(N), Projection=ALL）を `scripts/create-table.sh` に追加。openDayOfWeek を持つ PAIR META だけが載るスパース索引。
+  - `functions/weekly-open/`：EventBridge Schedule（`cron(0 * * * ? *)` 毎正時）で起動する `func(ctx) error` 型の Lambda。API Gateway からは呼ばれない。
+  - GSI1 で openDayOfWeek=今日 のペアを検索 → `shouldOpen`（純粋関数）でペアの timezone 基準に判定：オープン曜日・時刻を過ぎ、かつ lastOpenedAt が今回のオープン時刻より前のときだけオープン。二重オープン防止により毎時走っても1サイクル1回（冪等）。
+  - このサイクル分（createdAt>=lastOpenedAt, opened=false）を opened=true+openedAt に更新し lastOpenedAt を前進。各更新は opened=false 条件付き。両者ゼロでも lastOpenedAt は更新（静かにスキップ）。
+  - 通知：`buildNotifications`（純粋関数）で出し分け（両者ゼロは無言／書いた人「オープンしました」／書いてない人「1つ書くと○○のことづても見られます」）。書いた人はオープン前の未オープンSKのプレフィックスから判定。`sendNotification` は USER META の snsEndpointArn へ SNS Publish、未登録ならログしてスキップ。通知失敗はオープンと切り離しログのみ。
+  - `time/tzdata` を埋め込み Lambda 環境でも LoadLocation を効かせる。template.yaml に WeeklyOpenFunction（Schedule / Timeout 60 / DynamoDBCrudPolicy + sns:Publish）を追加。
+  - **未実装（別タスク）**：APNs エンドポイントARN（snsEndpointArn）の登録導線が無いため、現状では通知は実際には飛ばずログのみ。マルチタイムゾーン厳密対応（バッチの曜日判定は Asia/Tokyo 基準）も将来課題。
 
 ### 重要な発見：`sam local invoke`/`start-api`はAWS認証情報系の環境変数を`--env-vars`で上書きできない
 `DYNAMODB_ENDPOINT`のような独自の環境変数は`env.json`の指定どおりコンテナに渡るが、`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`は「Lambda予約環境変数」としてSAM CLIが実行ホストの `~/.aws/credentials` の `default` プロファイルから自動的に注入し、`env.json`の値やコマンドラインの`--profile`指定を上書きする（実機のLambda実行環境がIAMロールの認証情報を自動注入し、ユーザーが上書きできないのと同じ挙動をローカルでも再現している）。
@@ -66,7 +74,8 @@ kotozute/
 │   ├── post-kotozute/          # POST /kotozute
 │   ├── get-this-week/          # GET /kotozute/this-week
 │   ├── patch-kotozute/         # PATCH /kotozute/{id}
-│   └── get-archive/            # GET /kotozute/archive
+│   ├── get-archive/            # GET /kotozute/archive
+│   └── weekly-open/            # 週一オープンのバッチ（EventBridge起動、API外）
 │       （各ディレクトリに main.go / main_test.go / go.mod / go.sum）
 ├── events/                     # sam local invoke 用サンプルイベント（関数ごと・認証claims入り）
 ├── scripts/
@@ -112,14 +121,16 @@ curl http://127.0.0.1:3000/kotozute/this-week
 - `PATCH /me`・`GET /pair`・`PATCH /pair`・`PATCH /kotozute/{id}`・`GET /kotozute/archive` を実装済み（詳細は「現在地」参照）。これで API は全12本が揃った。
 - 残タスク：デプロイ後の実地確認（認証まわりと同様、`sam` のある環境で）。
 
-### 3. 週一オープンのバッチ ← 次の本命
-- GSI① を作成（`scripts/create-table.sh` に GSI 定義を追加。`template.yaml` のテーブル定義側にも要追加）。
-- EventBridge Scheduler → Lambda。オープン処理＋通知の出し分け＋lastOpenedAt 更新。両者ゼロはスキップ。二重オープン防止（lastOpenedAt を見て1サイクル未経過ならスキップ）。
-- API とは毛色が違う「時刻起動の Lambda」。まず 1〜4（GSI・器・対象検索・オープン処理）を DB 完結で作り、通知(SNS→APNs) は後半。
+### 3. 週一オープンのバッチ — ✅ 実装済み
+- GSI①・バッチ本体・オープン処理・通知の出し分けまで実装済み（詳細は「現在地」参照）。
+- 残タスク：デプロイして EventBridge の実起動・GSI クエリ・オープン挙動を実地確認。
 
-### 4. 通知（SNS→APNs）／本番デプロイまわり
-- APNs 設定、SNS 連携。通知の出し分け（書いた人／書いてない人／両者ゼロは無言）。
-- User Pool の確認メールを SES 経由に切り替え、iOS へ UserPoolId/ClientId を渡す。
+### 4. 本番デプロイ・通知の実配信・その他（残り）
+- **デプロイ全般**：`sam` のある環境で `sam build && sam deploy`。認証(401)・API・バッチの実挙動を確認。本番テーブル/GSI は現状 IaC 外なので、`template.yaml` への `AWS::DynamoDB::Table` 追加を検討。
+- **通知の実配信**：APNs 証明書設定＋SNS プラットフォームアプリ作成。APNs トークン→SNS エンドポイントARN を作り USER META の `snsEndpointArn` に保存する導線（`PATCH /me` の apnsToken 受領時など）。これが入ると weekly-open の通知が実際に飛ぶ。
+- **メール**：User Pool の確認メールを SES 経由に切り替え。
+- **iOS**：`UserPoolId`/`UserPoolClientId` を渡してログイン構成。
+- **GSI②（メール）**：Cognito 以外のログイン経路を作る場合に追加。
 
 ## 設計の出典
 全仕様は Notion「ことづて」設計ドキュメント（開発ページ配下）にある。矛盾があれば Notion を正とする。主要点は CLAUDE.md に転記済み。
