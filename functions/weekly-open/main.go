@@ -52,13 +52,13 @@ type notification struct {
 }
 
 type pairMeta struct {
-	PairID        string
-	Member1       string
-	Member2       string
-	OpenDayOfWeek int
-	OpenTime      string
-	Timezone      string
-	LastOpenedAt  string
+	PairID         string
+	Member1        string
+	Member2        string
+	OpenDayOfWeek  int
+	OpenTime       string
+	Timezone       string
+	CycleStartedAt string
 }
 
 // handler は EventBridge から定期起動される。API Gateway からは呼ばれないので
@@ -93,8 +93,8 @@ func handler(ctx context.Context) error {
 
 // shouldOpen はペアの timezone で「いまオープンすべきか」を判定する純粋関数。
 // - 今がそのペアのオープン曜日で、オープン時刻を過ぎている
-// - かつ、このサイクルではまだオープンしていない（lastOpenedAt が今回のオープン時刻より前）
-// 二重オープン防止は lastOpenedAt との比較で行うため、バッチが毎時走っても1サイクル1回に収まる。
+// - かつ、このサイクルではまだオープンしていない（cycleStartedAt が今回のオープン時刻より前）
+// 二重オープン防止は cycleStartedAt との比較で行うため、バッチが毎時走っても1サイクル1回に収まる。
 func shouldOpen(pair pairMeta, now time.Time) bool {
 	loc, err := time.LoadLocation(pair.Timezone)
 	if err != nil {
@@ -116,7 +116,7 @@ func shouldOpen(pair pairMeta, now time.Time) bool {
 	}
 
 	// 今回のオープン時刻以降に既にオープン済みなら、このサイクルは処理済み。
-	if last, err := time.Parse(time.RFC3339, pair.LastOpenedAt); err == nil && !last.Before(openMoment) {
+	if started, err := time.Parse(time.RFC3339, pair.CycleStartedAt); err == nil && !started.Before(openMoment) {
 		return false
 	}
 	return true
@@ -185,19 +185,23 @@ func buildPairMeta(item map[string]types.AttributeValue) pairMeta {
 	if v, ok := item["timezone"].(*types.AttributeValueMemberS); ok {
 		p.Timezone = v.Value
 	}
-	if v, ok := item["lastOpenedAt"].(*types.AttributeValueMemberS); ok {
-		p.LastOpenedAt = v.Value
+	if v, ok := item["cycleStartedAt"].(*types.AttributeValueMemberS); ok {
+		p.CycleStartedAt = v.Value
 	}
 	return p
 }
 
-// openPair はこのサイクル分の未オープンことづてを opened=true にし、lastOpenedAt を更新する。
-// 両者ゼロの週でも lastOpenedAt は更新してサイクルを前進させる（静かにスキップ）。
+// openPair は区切りを1つ前に進める。ことづては1枚も書き換えない。
+//
+//	previousCycleStartedAt ← cycleStartedAt   （いま閉じたサイクルが「読むサイクル」になる）
+//	cycleStartedAt         ← 現在             （ここから次のサイクルを書き始める）
+//
+// 両者ゼロの週でも区切りは進めてサイクルを前進させる（静かにスキップ）。
 func openPair(ctx context.Context, pair pairMeta, now time.Time) error {
 	nowStr := now.UTC().Format(time.RFC3339)
 
-	// このサイクル分の未オープンことづて。SK に「書いた人」が入っているので、
-	// オープン前にここから「誰が書いたか」を割り出せる。
+	// 通知の出し分けに「このサイクルで誰が書いたか」が要るので読むだけ読む。更新はしない。
+	// SK に書いた人が入っているので、SK だけ集めれば判定できる。
 	sks, err := queryCycleKotozuteSKs(ctx, pair)
 	if err != nil {
 		return err
@@ -205,12 +209,7 @@ func openPair(ctx context.Context, pair pairMeta, now time.Time) error {
 	wroteMember1 := someoneWrote(sks, pair.Member1)
 	wroteMember2 := someoneWrote(sks, pair.Member2)
 
-	for _, sk := range sks {
-		if err := markOpened(ctx, pair.PairID, sk, nowStr); err != nil {
-			return err
-		}
-	}
-	if err := updateLastOpenedAt(ctx, pair.PairID, nowStr); err != nil {
+	if err := advanceCycle(ctx, pair, nowStr); err != nil {
 		return err
 	}
 
@@ -278,21 +277,17 @@ func sendNotification(ctx context.Context, n notification) error {
 	return err
 }
 
-// queryCycleKotozuteSKs はこのサイクル（lastOpenedAt 以降）の未オープンことづての SK を集める。
-// createdAt >= lastOpenedAt かつ opened=false を FilterExpression で絞る。
+// queryCycleKotozuteSKs はいま閉じるサイクル（cycleStartedAt 以降）のことづての SK を集める。
+// 通知の出し分けに使うだけで、更新はしない。
 func queryCycleKotozuteSKs(ctx context.Context, pair pairMeta) ([]string, error) {
 	out, err := dynamoClient.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(tableName),
 		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),
-		FilterExpression:       aws.String("createdAt >= :since AND #opened = :false"),
-		ExpressionAttributeNames: map[string]string{
-			"#opened": "opened",
-		},
+		FilterExpression:       aws.String("createdAt >= :since"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":pk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pair.PairID)},
 			":prefix": &types.AttributeValueMemberS{Value: "KOTOZUTE#"},
-			":since":  &types.AttributeValueMemberS{Value: pair.LastOpenedAt},
-			":false":  &types.AttributeValueMemberBOOL{Value: false},
+			":since":  &types.AttributeValueMemberS{Value: pair.CycleStartedAt},
 		},
 	})
 	if err != nil {
@@ -306,37 +301,6 @@ func queryCycleKotozuteSKs(ctx context.Context, pair pairMeta) ([]string, error)
 		}
 	}
 	return sks, nil
-}
-
-// markOpened は1件のことづてを opened=true にし、openedAt を記録する。
-// opened=false を条件にして、二重更新（既にオープン済み）を避ける。
-func markOpened(ctx context.Context, pairID, sk, nowStr string) error {
-	_, err := dynamoClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(tableName),
-		Key: map[string]types.AttributeValue{
-			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
-			"SK": &types.AttributeValueMemberS{Value: sk},
-		},
-		UpdateExpression:    aws.String("SET #opened = :true, openedAt = :now"),
-		ConditionExpression: aws.String("#opened = :false"),
-		ExpressionAttributeNames: map[string]string{
-			"#opened": "opened",
-		},
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":true":  &types.AttributeValueMemberBOOL{Value: true},
-			":false": &types.AttributeValueMemberBOOL{Value: false},
-			":now":   &types.AttributeValueMemberS{Value: nowStr},
-		},
-	})
-	if err != nil {
-		// 直前に他の実行がオープン済みにした場合は条件エラーになるが、結果は同じなので無視してよい。
-		var condErr *types.ConditionalCheckFailedException
-		if errors.As(err, &condErr) {
-			return nil
-		}
-		return err
-	}
-	return nil
 }
 
 func getUserDisplayName(ctx context.Context, userID string) string {
@@ -365,19 +329,33 @@ func getUserAttr(ctx context.Context, userID, attr string) string {
 	return ""
 }
 
-func updateLastOpenedAt(ctx context.Context, pairID, nowStr string) error {
+// advanceCycle は区切りを1つ前へ進める。オープン処理の実体はこれだけ。
+//
+// 条件式で「読み取った時点の cycleStartedAt から変わっていないこと」を確かめる。
+// バッチが重なって走っても、区切りが二重に進まない。
+func advanceCycle(ctx context.Context, pair pairMeta, nowStr string) error {
 	_, err := dynamoClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: aws.String(tableName),
 		Key: map[string]types.AttributeValue{
-			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pair.PairID)},
 			"SK": &types.AttributeValueMemberS{Value: "META"},
 		},
-		UpdateExpression: aws.String("SET lastOpenedAt = :now"),
+		UpdateExpression:    aws.String("SET previousCycleStartedAt = :prev, cycleStartedAt = :now"),
+		ConditionExpression: aws.String("cycleStartedAt = :prev"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":now": &types.AttributeValueMemberS{Value: nowStr},
+			":prev": &types.AttributeValueMemberS{Value: pair.CycleStartedAt},
+			":now":  &types.AttributeValueMemberS{Value: nowStr},
 		},
 	})
-	return err
+	if err != nil {
+		// 他の実行が先に進めた場合。結果は同じなので成功扱いにする。
+		var condErr *types.ConditionalCheckFailedException
+		if errors.As(err, &condErr) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func main() {

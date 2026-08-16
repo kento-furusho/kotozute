@@ -24,10 +24,10 @@ func TestShouldOpen(t *testing.T) {
 	saturday := time.Date(2026, 8, 8, 12, 0, 0, 0, loc)
 
 	base := pairMeta{
-		OpenDayOfWeek: 5, // 金曜
-		OpenTime:      "20:00",
-		Timezone:      "Asia/Tokyo",
-		LastOpenedAt:  "2026-07-31T20:00:00Z", // 先週オープン済み
+		OpenDayOfWeek:  5, // 金曜
+		OpenTime:       "20:00",
+		Timezone:       "Asia/Tokyo",
+		CycleStartedAt: "2026-07-31T20:00:00Z", // 先週オープンして始まったサイクル
 	}
 
 	tests := []struct {
@@ -56,7 +56,7 @@ func TestShouldOpen(t *testing.T) {
 		},
 		{
 			name: "金曜20:00だが今サイクル既にオープン済み → しない",
-			pair: func() pairMeta { p := base; p.LastOpenedAt = "2026-08-07T20:00:00+09:00"; return p }(),
+			pair: func() pairMeta { p := base; p.CycleStartedAt = "2026-08-07T20:00:00+09:00"; return p }(),
 			now:  friday2000,
 			want: false,
 		},
@@ -136,16 +136,19 @@ func TestBuildNotifications(t *testing.T) {
 
 func TestBuildPairMeta(t *testing.T) {
 	item := map[string]types.AttributeValue{
-		"PK":            &types.AttributeValueMemberS{Value: "PAIR#p01"},
-		"member1":       &types.AttributeValueMemberS{Value: "k01"},
-		"member2":       &types.AttributeValueMemberS{Value: "k02"},
-		"openDayOfWeek": &types.AttributeValueMemberN{Value: "5"},
-		"openTime":      &types.AttributeValueMemberS{Value: "20:00"},
-		"timezone":      &types.AttributeValueMemberS{Value: "Asia/Tokyo"},
-		"lastOpenedAt":  &types.AttributeValueMemberS{Value: "2026-07-31T20:00:00Z"},
+		"PK":             &types.AttributeValueMemberS{Value: "PAIR#p01"},
+		"member1":        &types.AttributeValueMemberS{Value: "k01"},
+		"member2":        &types.AttributeValueMemberS{Value: "k02"},
+		"openDayOfWeek":  &types.AttributeValueMemberN{Value: "5"},
+		"openTime":       &types.AttributeValueMemberS{Value: "20:00"},
+		"timezone":       &types.AttributeValueMemberS{Value: "Asia/Tokyo"},
+		"cycleStartedAt": &types.AttributeValueMemberS{Value: "2026-07-31T20:00:00Z"},
 	}
 	p := buildPairMeta(item)
 	if p.PairID != "p01" || p.Member1 != "k01" || p.Member2 != "k02" || p.OpenDayOfWeek != 5 {
 		t.Errorf("unexpected pairMeta: %+v", p)
+	}
+	if p.CycleStartedAt != "2026-07-31T20:00:00Z" {
+		t.Errorf("CycleStartedAt = %q, want %q", p.CycleStartedAt, "2026-07-31T20:00:00Z")
 	}
 }
