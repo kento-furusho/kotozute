@@ -35,24 +35,6 @@ func userIDFromRequest(request events.APIGatewayProxyRequest) (string, bool) {
 	return sub, true
 }
 
-// getUserPairID は USER#<userID>/META から pairId を読む。ペア未成立なら空文字を返す。
-func getUserPairID(ctx context.Context, userID string) (string, error) {
-	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
-		TableName: aws.String(tableName),
-		Key: map[string]types.AttributeValue{
-			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
-			"SK": &types.AttributeValueMemberS{Value: "META"},
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-	if v, ok := out.Item["pairId"].(*types.AttributeValueMemberS); ok {
-		return v.Value, nil
-	}
-	return "", nil
-}
-
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
@@ -95,21 +77,15 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return errorResponse(http.StatusBadRequest, "body is required"), nil
 	}
 
-	// ことづては自分のペアの中に書く。ペア未成立なら書き込み先が無いので弾く。
-	pairID, err := getUserPairID(ctx, userID)
-	if err != nil {
-		return errorResponse(http.StatusInternalServerError, "failed to fetch user"), nil
-	}
-	if pairID == "" {
-		return errorResponse(http.StatusConflict, "user is not paired yet"), nil
-	}
-
+	// ことづては書いた人の下に置く。ペアは要らない。
+	// オンボーディングで「最初の1枚」を書いてから招待する導線を成立させるため。
 	createdAt := time.Now().UTC().Format(time.RFC3339)
 	kotozuteID := uuid.NewString()
 
 	item := map[string]types.AttributeValue{
-		"PK":   &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
-		"SK":   &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#%s#%s", userID, createdAt, kotozuteID)},
+		// 書いた人がパーティション。SK に書いた人を入れる必要はなくなった。
+		"PK":   &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
+		"SK":   &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#%s", createdAt, kotozuteID)},
 		"body": &types.AttributeValueMemberS{Value: req.Body},
 		// opened フラグは持たせない。オープン済みかどうかはペアの cycleStartedAt との
 		// 比較で決まるので、1枚ごとに状態を分散させない。

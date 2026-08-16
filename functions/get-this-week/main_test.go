@@ -197,7 +197,7 @@ func contains(s, substr string) bool {
 
 func TestParseKotozuteItem(t *testing.T) {
 	valid := map[string]types.AttributeValue{
-		"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#k01#2026-08-01T09:00:00Z#uuid-1"},
+		"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#2026-08-01T09:00:00Z#uuid-1"},
 		"body":      &types.AttributeValueMemberS{Value: "ありがとう"},
 		"createdAt": &types.AttributeValueMemberS{Value: "2026-08-01T09:00:00Z"},
 	}
@@ -216,7 +216,7 @@ func TestParseKotozuteItem(t *testing.T) {
 		{
 			name: "SK format missing parts",
 			av: map[string]types.AttributeValue{
-				"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#k01"},
+				"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#only-two"},
 				"body":      &types.AttributeValueMemberS{Value: "x"},
 				"createdAt": &types.AttributeValueMemberS{Value: "2026-08-01T09:00:00Z"},
 			},
@@ -224,7 +224,7 @@ func TestParseKotozuteItem(t *testing.T) {
 		{
 			name: "body wrong type",
 			av: map[string]types.AttributeValue{
-				"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#k01#2026-08-01T09:00:00Z#uuid-1"},
+				"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#2026-08-01T09:00:00Z#uuid-1"},
 				"body":      &types.AttributeValueMemberBOOL{Value: true},
 				"createdAt": &types.AttributeValueMemberS{Value: "2026-08-01T09:00:00Z"},
 			},
@@ -232,7 +232,7 @@ func TestParseKotozuteItem(t *testing.T) {
 		{
 			name: "createdAt missing",
 			av: map[string]types.AttributeValue{
-				"SK":   &types.AttributeValueMemberS{Value: "KOTOZUTE#k01#2026-08-01T09:00:00Z#uuid-1"},
+				"SK":   &types.AttributeValueMemberS{Value: "KOTOZUTE#2026-08-01T09:00:00Z#uuid-1"},
 				"body": &types.AttributeValueMemberS{Value: "x"},
 			},
 		},

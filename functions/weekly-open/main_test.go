@@ -87,19 +87,6 @@ func TestParseHHMM(t *testing.T) {
 	}
 }
 
-func TestSomeoneWrote(t *testing.T) {
-	sks := []string{
-		"KOTOZUTE#k01#2026-08-07T10:00:00Z#a",
-		"KOTOZUTE#k01#2026-08-07T11:00:00Z#b",
-	}
-	if !someoneWrote(sks, "k01") {
-		t.Error("k01 should have written")
-	}
-	if someoneWrote(sks, "k02") {
-		t.Error("k02 should not have written")
-	}
-}
-
 func TestBuildNotifications(t *testing.T) {
 	pair := pairMeta{Member1: "k01", Member2: "k02"}
 

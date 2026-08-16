@@ -92,7 +92,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	// URLのidだけでは完全なSKを組み立てられないため、自分のことづてを検索してidが一致する1件を探す。
-	// KOTOZUTE#<自分>#... しか検索しないので、他人のことづては構造的に見つからない。
+	// 自分のパーティションしか引かないので、他人のことづては構造的に見つからない。
 	found, err := findMyKotozute(ctx, pairID, userID, kotozuteID)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to fetch kotozute"), nil
@@ -131,7 +131,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 				Update: &types.Update{
 					TableName: aws.String(tableName),
 					Key: map[string]types.AttributeValue{
-						"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+						"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
 						"SK": &types.AttributeValueMemberS{Value: found.SK},
 					},
 					UpdateExpression: aws.String("SET #body = :body"),
@@ -173,8 +173,8 @@ func findMyKotozute(ctx context.Context, pairID, userID, kotozuteID string) (*fo
 		TableName:              aws.String(tableName),
 		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
-			":prefix": &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#", userID)},
+			":pk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
+			":prefix": &types.AttributeValueMemberS{Value: "KOTOZUTE#"},
 		},
 	})
 	if err != nil {
@@ -198,17 +198,16 @@ func findMyKotozute(ctx context.Context, pairID, userID, kotozuteID string) (*fo
 	return nil, nil
 }
 
-// kotozuteIDFromSK は "KOTOZUTE#<書いた人>#<日時>#<id>" の末尾idを取り出す。
-// 形式が違えば空文字を返す。
+// kotozuteIDFromSK は "KOTOZUTE#<日時>#<id>" の末尾idを取り出す。
+// 書いた人はパーティション側にあるのでSKには含まれない。形式が違えば空文字を返す。
 func kotozuteIDFromSK(sk string) string {
-	parts := strings.SplitN(sk, "#", 4)
-	if len(parts) != 4 {
+	parts := strings.SplitN(sk, "#", 3)
+	if len(parts) != 3 {
 		return ""
 	}
-	return parts[3]
+	return parts[2]
 }
 
-// getUserPairID は USER#<userID>/META から pairId を読む。ペア未成立なら空文字を返す。
 // getCycleStartedAt は PAIR META から「書くサイクルの開始時刻」を読む。
 // これより後に書かれたことづてがまだオープンされていないもの。
 func getCycleStartedAt(ctx context.Context, pairID string) (string, error) {

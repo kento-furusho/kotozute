@@ -118,8 +118,14 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return errorResponse(http.StatusInternalServerError, "failed to fetch user"), nil
 	}
 	if pairID == "" {
+		// ペア未成立でも、ペア成立前に書いた分は自分のものとして返す。
+		// 相手はいないので、ロック関係の値はすべて偽のまま。
+		_, myCurrent, err := queryCycles(ctx, userID, buildPairMetaFromItem(nil))
+		if err != nil {
+			return errorResponse(http.StatusInternalServerError, "failed to fetch kotozute"), nil
+		}
 		return okJSON(thisWeekResponse{
-			MyKotozute:        []kotozuteResponseItem{},
+			MyKotozute:        toResponseItems(myCurrent),
 			OpenStatus:        "before",
 			CanSeePartner:     false,
 			LastCycle:         lastCycleBlock{Mine: []kotozuteResponseItem{}},
@@ -137,11 +143,11 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 
 	// 4. 読むサイクルの頭から現在までをまとめて引き、2つのサイクルに振り分ける。
 	//    2回のQueryで、自分/相手 × 読む/書く の4組が揃う。
-	myPrevious, myCurrent, err := queryCycles(ctx, pairID, userID, meta)
+	myPrevious, myCurrent, err := queryCycles(ctx, userID, meta)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to fetch kotozute"), nil
 	}
-	partnerPrevious, partnerCurrent, err := queryCycles(ctx, pairID, partnerID, meta)
+	partnerPrevious, partnerCurrent, err := queryCycles(ctx, partnerID, meta)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to fetch kotozute"), nil
 	}
@@ -222,22 +228,22 @@ func toResponseItems(items []kotozuteItem) []kotozuteResponseItem {
 // queryCycles は読むサイクルの頭から現在までを1回のQueryで引き、
 // cycleStartedAt を境に「読むサイクル」と「書くサイクル」へ振り分ける。
 //
-// SK は KOTOZUTE#<書いた人>#<ISO日時>#<id> で時刻が昇順に並ぶので、
-// 範囲検索がそのまま期間の切り出しになる。opened フラグでの絞り込みは不要。
+// ことづては書いた人のパーティション（USER#<書いた人>）にあり、
+// SK は KOTOZUTE#<ISO日時>#<id> で時刻が昇順に並ぶので、範囲検索がそのまま期間の切り出しになる。
 //
 // DynamoDBは1つのソートキーに1条件式しか使えないため、begins_with と範囲条件を
-// 同時に満たすべくBETWEENで組み立てる（上限のUnicode最大文字￿で、この書いた人の
-// プレフィックス内の最大値を保証する定石パターン）。
-func queryCycles(ctx context.Context, pairID, userID string, meta pairMeta) (previous, current []kotozuteItem, err error) {
-	lower := fmt.Sprintf("KOTOZUTE#%s#%s", userID, meta.PreviousCycleStartedAt)
-	upper := fmt.Sprintf("KOTOZUTE#%s#￿", userID)
-	boundary := fmt.Sprintf("KOTOZUTE#%s#%s", userID, meta.CycleStartedAt)
+// 同時に満たすべくBETWEENで組み立てる（上限のUnicode最大文字￿で KOTOZUTE# の
+// 最大値を保証する定石パターン）。
+func queryCycles(ctx context.Context, userID string, meta pairMeta) (previous, current []kotozuteItem, err error) {
+	lower := fmt.Sprintf("KOTOZUTE#%s", meta.PreviousCycleStartedAt)
+	upper := "KOTOZUTE#￿"
+	boundary := fmt.Sprintf("KOTOZUTE#%s", meta.CycleStartedAt)
 
 	out, err := dynamoClient.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(tableName),
 		KeyConditionExpression: aws.String("PK = :pk AND SK BETWEEN :lower AND :upper"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk":    &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+			":pk":    &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
 			":lower": &types.AttributeValueMemberS{Value: lower},
 			":upper": &types.AttributeValueMemberS{Value: upper},
 		},
@@ -271,8 +277,9 @@ func parseKotozuteItem(av map[string]types.AttributeValue) (kotozuteItem, error)
 	if !ok {
 		return kotozuteItem{}, fmt.Errorf("SK missing or invalid type")
 	}
-	parts := strings.SplitN(sk.Value, "#", 4)
-	if len(parts) != 4 {
+	// SK は KOTOZUTE#<ISO日時>#<id>。書いた人はパーティション側にあるので含まれない。
+	parts := strings.SplitN(sk.Value, "#", 3)
+	if len(parts) != 3 {
 		return kotozuteItem{}, fmt.Errorf("unexpected SK format: %s", sk.Value)
 	}
 
@@ -286,7 +293,7 @@ func parseKotozuteItem(av map[string]types.AttributeValue) (kotozuteItem, error)
 	}
 
 	return kotozuteItem{
-		ID:        parts[3],
+		ID:        parts[2],
 		Body:      body.Value,
 		CreatedAt: createdAt.Value,
 	}, nil

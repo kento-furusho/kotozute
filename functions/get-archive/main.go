@@ -121,15 +121,15 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		}
 	}
 
-	// SK は KOTOZUTE#<書いた人>#<ISO日時>#<id>。ISO日時は "2026-08-..." なので、
-	// 年月プレフィックス "YYYY-MM" で begins_with すれば、その月のことづてに絞れる。
-	skPrefix := fmt.Sprintf("KOTOZUTE#%s#%04d-%02d", targetUser, q.Year, q.Month)
+	// ことづては書いた人のパーティションにある。SK は KOTOZUTE#<ISO日時>#<id> で、
+	// ISO日時は "2026-08-..." なので、年月プレフィックスで begins_with すればその月に絞れる。
+	skPrefix := fmt.Sprintf("KOTOZUTE#%04d-%02d", q.Year, q.Month)
 
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(tableName),
 		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+			":pk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", targetUser)},
 			":prefix": &types.AttributeValueMemberS{Value: skPrefix},
 		},
 		Limit: aws.Int32(int32(q.Limit)),
@@ -258,11 +258,12 @@ func parseArchiveItem(av map[string]types.AttributeValue) (archiveItem, bool) {
 	if !ok {
 		return archiveItem{}, false
 	}
-	parts := strings.SplitN(sk.Value, "#", 4)
-	if len(parts) != 4 {
+	// SK は KOTOZUTE#<ISO日時>#<id>。書いた人はパーティション側にあるので含まれない。
+	parts := strings.SplitN(sk.Value, "#", 3)
+	if len(parts) != 3 {
 		return archiveItem{}, false
 	}
-	item := archiveItem{ID: parts[3]}
+	item := archiveItem{ID: parts[2]}
 	if v, ok := av["body"].(*types.AttributeValueMemberS); ok {
 		item.Body = v.Value
 	}

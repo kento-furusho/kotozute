@@ -26,6 +26,11 @@ const (
 	defaultOpenDayOfWeek = 5 // 金曜(仮)
 	defaultOpenTime      = "20:00"
 	defaultTimezone      = "Asia/Tokyo"
+
+	// サイクルの区切りの初期値。遠い過去にしておくことで、
+	// ペア成立前に書いた分（オンボーディングの「最初の1枚」）も
+	// 最初の書くサイクルに入る。成立日時にすると範囲から外れてしまう。
+	beginningOfTime = "1970-01-01T00:00:00Z"
 )
 
 var dynamoClient *dynamodb.Client
@@ -155,7 +160,6 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	now := time.Now().UTC()
-	nowStr := now.Format(time.RFC3339)
 
 	_, err = dynamoClient.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
 		TransactItems: []types.TransactWriteItem{
@@ -191,10 +195,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 						"openTime":      &types.AttributeValueMemberS{Value: defaultOpenTime},
 						"timezone":      &types.AttributeValueMemberS{Value: defaultTimezone},
 						"status":        &types.AttributeValueMemberS{Value: "active"},
-						// サイクルの区切りは2つ。成立時は両方を同じ時刻にして、
+						// サイクルの区切りは2つ。成立時は両方を同じ値にして、
 						// 読むサイクルを空（＝まだ何もオープンされていない）から始める。
-						"cycleStartedAt":         &types.AttributeValueMemberS{Value: nowStr},
-						"previousCycleStartedAt": &types.AttributeValueMemberS{Value: nowStr},
+						"cycleStartedAt":         &types.AttributeValueMemberS{Value: beginningOfTime},
+						"previousCycleStartedAt": &types.AttributeValueMemberS{Value: beginningOfTime},
 					},
 					ConditionExpression: aws.String("attribute_not_exists(PK)"),
 				},
