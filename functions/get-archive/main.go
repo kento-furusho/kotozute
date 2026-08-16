@@ -105,6 +105,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	// 誰のことづてを見るか。partner の場合は PAIR META から相手を解決する。
 	targetUser := userID
 	partnerOnly := false
+	cycleStartedAt := ""
 	if q.Whose == "partner" {
 		members, err := getPairMembers(ctx, pairID)
 		if err != nil {
@@ -112,6 +113,12 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		}
 		targetUser = partnerUserID(members, userID)
 		partnerOnly = true
+
+		// オープン済みかどうかの判定に、書くサイクルの開始時刻が要る。
+		cycleStartedAt, err = getCycleStartedAt(ctx, pairID)
+		if err != nil {
+			return errorResponse(http.StatusInternalServerError, "failed to fetch pair"), nil
+		}
 	}
 
 	// SK は KOTOZUTE#<書いた人>#<ISO日時>#<id>。ISO日時は "2026-08-..." なので、
@@ -130,11 +137,12 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	if startKey != nil {
 		input.ExclusiveStartKey = startKey
 	}
-	// 相手の過去分は opened=true のみ見せる（過去ロックの緩和）。
+	// 相手の過去分はオープン済みのみ見せる（過去ロックの緩和）。
+	// オープン済み ＝ 書くサイクルの開始より前に書かれたもの。
+	// まだ一度もオープンしていない場合（cycleStartedAt が空）は、見せられるものが無い。
 	if partnerOnly {
-		input.FilterExpression = aws.String("#opened = :true")
-		input.ExpressionAttributeNames = map[string]string{"#opened": "opened"}
-		input.ExpressionAttributeValues[":true"] = &types.AttributeValueMemberBOOL{Value: true}
+		input.FilterExpression = aws.String("createdAt < :cycleStartedAt")
+		input.ExpressionAttributeValues[":cycleStartedAt"] = &types.AttributeValueMemberS{Value: cycleStartedAt}
 	}
 
 	out, err := dynamoClient.Query(ctx, input)
@@ -270,6 +278,25 @@ func partnerUserID(members pairMembers, myUserID string) string {
 		return members.Member2
 	}
 	return members.Member1
+}
+
+// getCycleStartedAt は PAIR META から「書くサイクルの開始時刻」を読む。
+// これより前に書かれたことづてがオープン済み。
+func getCycleStartedAt(ctx context.Context, pairID string) (string, error) {
+	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+			"SK": &types.AttributeValueMemberS{Value: "META"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if v, ok := out.Item["cycleStartedAt"].(*types.AttributeValueMemberS); ok {
+		return v.Value, nil
+	}
+	return "", nil
 }
 
 func getUserPairID(ctx context.Context, userID string) (string, error) {

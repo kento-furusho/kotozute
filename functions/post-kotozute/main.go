@@ -72,8 +72,9 @@ type postKotozuteRequest struct {
 }
 
 type kotozuteResponse struct {
-	ID        string `json:"id"`
-	Body      string `json:"body"`
+	ID   string `json:"id"`
+	Body string `json:"body"`
+	// 書いた直後は必ず未オープン。保存はせず、この場で false を返すだけにする。
 	Opened    bool   `json:"opened"`
 	CreatedAt string `json:"createdAt"`
 }
@@ -107,10 +108,11 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	kotozuteID := uuid.NewString()
 
 	item := map[string]types.AttributeValue{
-		"PK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
-		"SK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#%s#%s", userID, createdAt, kotozuteID)},
-		"body":      &types.AttributeValueMemberS{Value: req.Body},
-		"opened":    &types.AttributeValueMemberBOOL{Value: false},
+		"PK":   &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+		"SK":   &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#%s#%s", userID, createdAt, kotozuteID)},
+		"body": &types.AttributeValueMemberS{Value: req.Body},
+		// opened フラグは持たせない。オープン済みかどうかはペアの cycleStartedAt との
+		// 比較で決まるので、1枚ごとに状態を分散させない。
 		"createdAt": &types.AttributeValueMemberS{Value: createdAt},
 	}
 

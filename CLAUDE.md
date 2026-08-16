@@ -39,8 +39,8 @@
 | PK | SK | 主な属性 |
 |---|---|---|
 | USER#<id> | META | email, displayName, apnsToken, pairId |
-| PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, timezone, status, lastOpenedAt |
-| PAIR#<id> | KOTOZUTE#<書いた人id>#<ISO日時>#<ことづてid> | body, opened(bool), openedAt, createdAt |
+| PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, timezone, status, cycleStartedAt, previousCycleStartedAt |
+| PAIR#<id> | KOTOZUTE#<書いた人id>#<ISO日時>#<ことづてid> | body, createdAt |
 | INVITE#<token> | META | inviterUserId, status, ttl |
 
 GSI（2個）:
@@ -52,9 +52,9 @@ GSI（2個）:
 - 「招待」はトークンで直引き（GetItem）のため GSI 不要
 
 ### 主なアクセスパターン
-- 今週の自分のことづて: `PK=PAIR#<pair>, SK begins_with KOTOZUTE#<自分>#<今週範囲>`
-- 今週の相手のことづて: 同上（相手ID）かつ opened=true
-- アーカイブ（月ごと）: `SK begins_with KOTOZUTE#<誰か>#<年月>`（相手は opened=true のみ）
+- 書くサイクルの自分のことづて: `PK=PAIR#<pair>, SK BETWEEN KOTOZUTE#<自分>#<cycleStartedAt> AND KOTOZUTE#<自分>#￿`
+- 読むサイクルの相手のことづて: `SK BETWEEN KOTOZUTE#<相手>#<previousCycleStartedAt> AND KOTOZUTE#<相手>#<cycleStartedAt>`
+- アーカイブ（月ごと）: `SK begins_with KOTOZUTE#<誰か>#<年月>`（相手は `cycleStartedAt` より前のみ＝オープン済み）
 - ログイン: GSI② `PK=EMAIL#<addr>`
 - バッチ対象ペア検索: GSI① `PK=openDayOfWeek=5`
 - 自分の情報/ペア: `GetItem USER#<id>/META` → pairId 取得
@@ -80,16 +80,20 @@ GSI（2個）:
 ### GET /kotozute/this-week のレスポンス（相互ロック内包）
 ```json
 {
-  "myKotozute": [ ... 自分の今週分（常に見える）... ],
+  "myKotozute": [ ... 書くサイクルの自分の分（常に見える）... ],
   "openStatus": "before" | "opened",
   "canSeePartner": true,
-  "partnerKotozute": [ ... ],
+  "lastCycle": {
+    "mine":    [ ... 直前のサイクルの自分の分 ... ],
+    "partner": [ ... 直前のサイクルの相手の分 ... ]
+  },
   "partnerHasWritten": true,
   "nextOpenAt": "2026-06-19T20:00"
 }
 ```
-- `canSeePartner=false` のとき `partnerKotozute` は空/省略（本文を返さない）
-- `partnerHasWritten` は 0枚か1枚以上かのみ（枚数は返さない）
+- `lastCycle` は直前にオープンされたサイクル。**次のオープンまで手元で読める**（アーカイブにも残る）
+- `lastCycle.mine` は自分のものなので常に返す。`canSeePartner=false` のとき `lastCycle.partner` は**キーごと省略**（本文を返さない）
+- `partnerHasWritten` は「相手が**書くサイクル**に1枚以上書いたか」のみ（枚数は返さない）
 
 ### GET /kotozute/archive
 ```
@@ -105,9 +109,13 @@ GET /kotozute/archive?whose=me|partner&year=2026&month=6&cursor=<不透明トー
 
 ### 相互ロック判定（GET /kotozute/this-week 内）
 ```
-自分が相手の今週分を見れる
-  ⟺ 相手の今週分が opened=true（バッチ解禁済み） かつ 自分が今週1枚以上書いている
+自分が相手のことづてを見れる
+  ⟺ 読むサイクルに相手のことづてが1枚以上ある
+     かつ 自分が「読むサイクル」か「書くサイクル」のどちらかに1枚以上書いている
 ```
+自分側で2つのサイクルを見るのは意図的:
+- **読むサイクルに書いた** … その週ちゃんと書いた人。オープン直後にそのまま読める（通知文「今週のことづて、オープンしました」と一致）
+- **書くサイクルに書いた** … その週は書かなかったが、いま1枚書いた人。これで解禁される（通知文「あなたが1つ書くと、○○のことづても見られます」と一致）
 分岐（自分視点）:
 | 自分の今週分 | 相手のopened | 画面 |
 |---|---|---|
@@ -118,21 +126,41 @@ GET /kotozute/archive?whose=me|partner&year=2026&month=6&cursor=<不透明トー
 
 気配表示：相手0枚なら気配・ロック要素を一切出さない（`partnerHasWritten=false`）。枚数は返さない。
 
-### サイクル境界（「今週」の定義）
-- カレンダー週ではなく **オープン日を境界**にする。ペアの META に `lastOpenedAt`（前回オープン日時）を持つ。
-- 今週の範囲 = `lastOpenedAt 〜 現在`。バッチがオープンしたら `lastOpenedAt` を更新。
-- 初回：ペア成立（invite accept）時に `lastOpenedAt = ペア成立日時` で初期化。
+### サイクル境界（区切りは2つ持つ）
+カレンダー週ではなく **オープン日を境界**にする。ペアの META に区切りを **2つ** 持つ。
+
+```
+previousCycleStartedAt        cycleStartedAt              現在
+        │                            │                     │
+        │←──── 読むサイクル ────→│←── 書くサイクル ──→│
+        │   （オープン済み）      │   （次のオープン待ち）  │
+```
+
+- **読むサイクル** = `[previousCycleStartedAt, cycleStartedAt)`。直前に閉じた分。相手のことづてはここから返す。
+- **書くサイクル** = `[cycleStartedAt, 現在)`。いま書いている分。自分のことづては基本ここ。
+- 初回：ペア成立（invite accept）時に両方を **ペア成立日時** で初期化する（読むサイクルが空＝オープン前の状態）。
+
+**区切りを2つにする理由**：1つだと、オープンした瞬間に「読むもの」と「書くもの」の区別がつかない。
+オープンでその1つの区切りを前に進めると、いま解禁したことづてが同時に範囲外へ出てしまい、
+④「相手のことづてを見せる」に永久に到達できなくなる（実際にそうなっていた）。
+
+**ことづてに `opened` フラグは持たせない**。あることづてがオープン済みかどうかは
+「書かれた時刻が `cycleStartedAt` より前か」で決まり、ペアの区切りだけで判定できる。
+状態を1箇所に集めることで、「アイテムは opened なのに範囲外」という食い違いが起こり得なくなる。
 
 ### 週一オープン処理（バッチ）
 ```
 EventBridge(曜日×時刻) → Lambda
   → GSI①で openDayOfWeek/openTime のペアを検索
-  → 各ペアの今週分ことづてを opened=true に更新（openedAt 記録）
-  → lastOpenedAt を更新
+  → 区切りを1つずつ前へ進める（UpdateItem 1回）
+       previousCycleStartedAt ← cycleStartedAt
+       cycleStartedAt         ← 現在
   → 2人へ SNS→APNs で通知（下記の出し分け）
 ```
-- **両者ゼロの週**：opened にする対象なし。通知しない。lastOpenedAt は更新して次サイクルへ（静かにスキップ）。
-- **二重オープン防止**：lastOpenedAt を見て「前回から1サイクル経ってなければオープンしない」。
+- **ことづては1枚も書き換えない**。オープンはペアの区切りを進めるだけ（1ペアあたり UpdateItem 1回）。
+- **両者ゼロの週**：通知しない。区切りは進めて次サイクルへ（静かにスキップ）。
+- **二重オープン防止**：`cycleStartedAt` が今回のオープン時刻以降なら処理済みとみなす。
+- 通知の出し分けに「誰が書いたか」が要るので、閉じるサイクルのことづては読む（更新はしない）。
 
 ### 通知の出し分け
 - 今週書いた人 → 「今週のことづて、オープンしました」
@@ -140,12 +168,12 @@ EventBridge(曜日×時刻) → Lambda
 - 両者ゼロの週は通知しない。
 
 ### 過去ロックの緩和（現在は厳格・過去は寛容）
-- 今週分：厳格（相互ロック）
-- アーカイブ（過去分）：opened=true なら見られる（自分がその週書いたかは問わない）。実装は `GET /kotozute/archive?whose=partner` を opened=true で絞るだけ。
+- 今のサイクル：厳格（相互ロック）
+- アーカイブ（過去分）：オープン済みなら見られる（自分がその週書いたかは問わない）。実装は `GET /kotozute/archive?whose=partner` を `cycleStartedAt` より前で絞るだけ。
 
 ### 状態遷移・編集/削除
 - ことづて：書く →（オープン前：下書き、本人のみ、編集可）→ 週一オープン → 確定（変更不可）
-- **編集**：オープン前のみ、本文のみ。サーバーで可否判定。
+- **編集**：書くサイクル（`createdAt >= cycleStartedAt`）のもののみ、本文のみ。サーバーで可否判定。
 - **削除**：実装しない（状態遷移を一方向に保つ）。
 
 ---

@@ -21,13 +21,12 @@ import (
 const tableName = "kotozute"
 
 // PAIR META（PAIR#<id>/META）がまだ存在しない場合のデフォルト値。
-// lastOpenedAtは遠い過去のsentinelにし、「これまで書いた全部を今週扱い」にする。
-// POST /invites/accept 実装後、実データが書き込まれれば自然にそちらへ移行する。
+// 区切りは遠い過去のsentinelにし、「これまで書いた全部を書くサイクル扱い」にする。
 const (
-	defaultLastOpenedAt  = "1970-01-01T00:00:00Z"
-	defaultOpenDayOfWeek = 5 // time.Weekday: 0=Sun...6=Sat → 5=金曜(仮)
-	defaultOpenTime      = "20:00"
-	defaultTimezone      = "Asia/Tokyo"
+	defaultCycleStartedAt = "1970-01-01T00:00:00Z"
+	defaultOpenDayOfWeek  = 5 // time.Weekday: 0=Sun...6=Sat → 5=金曜(仮)
+	defaultOpenTime       = "20:00"
+	defaultTimezone       = "Asia/Tokyo"
 )
 
 var dynamoClient *dynamodb.Client
@@ -63,7 +62,6 @@ func init() {
 type kotozuteItem struct {
 	ID        string
 	Body      string
-	Opened    bool
 	CreatedAt string
 }
 
@@ -73,22 +71,37 @@ type kotozuteResponseItem struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// lastCycleBlock は直前にオープンされたサイクルの中身。
+// 次のオープンまで、ふたりぶんをそのまま手元で読めるようにする。
+type lastCycleBlock struct {
+	// 自分が書いた分。自分のものなので常に返す。
+	Mine []kotozuteResponseItem `json:"mine"`
+	// 相手が書いた分。canSeePartner のときだけキーごと現れる。
+	Partner []kotozuteResponseItem `json:"partner,omitempty"`
+}
+
 type thisWeekResponse struct {
-	MyKotozute        []kotozuteResponseItem `json:"myKotozute"`
-	OpenStatus        string                 `json:"openStatus"`
-	CanSeePartner     bool                   `json:"canSeePartner"`
-	PartnerKotozute   []kotozuteResponseItem `json:"partnerKotozute,omitempty"`
-	PartnerHasWritten bool                   `json:"partnerHasWritten"`
-	NextOpenAt        string                 `json:"nextOpenAt"`
+	// いま書いているサイクルの自分の分。
+	MyKotozute []kotozuteResponseItem `json:"myKotozute"`
+	OpenStatus string                 `json:"openStatus"`
+	// 相手の本文を見せてよいか。判断はサーバーで済ませる。
+	CanSeePartner bool           `json:"canSeePartner"`
+	LastCycle     lastCycleBlock `json:"lastCycle"`
+	// 相手がいま書いているサイクルに1枚以上書いたか。枚数は返さない。
+	PartnerHasWritten bool   `json:"partnerHasWritten"`
+	NextOpenAt        string `json:"nextOpenAt"`
 }
 
 type pairMeta struct {
-	LastOpenedAt  string
-	OpenDayOfWeek int
-	OpenTime      string
-	Timezone      string
-	Member1       string // ペアの片方のユーザーID
-	Member2       string // ペアのもう片方のユーザーID
+	// 書くサイクルの開始（＝前回オープンした時刻）。
+	CycleStartedAt string
+	// 読むサイクルの開始（＝前々回オープンした時刻）。
+	PreviousCycleStartedAt string
+	OpenDayOfWeek          int
+	OpenTime               string
+	Timezone               string
+	Member1                string // ペアの片方のユーザーID
+	Member2                string // ペアのもう片方のユーザーID
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -109,6 +122,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 			MyKotozute:        []kotozuteResponseItem{},
 			OpenStatus:        "before",
 			CanSeePartner:     false,
+			LastCycle:         lastCycleBlock{Mine: []kotozuteResponseItem{}},
 			PartnerHasWritten: false,
 			NextOpenAt:        "",
 		})
@@ -121,12 +135,13 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 	partnerID := partnerUserID(meta, userID)
 
-	// 4. 自分・相手それぞれの今週分ことづてを取得する。
-	myItems, err := queryKotozuteForUser(ctx, pairID, userID, meta.LastOpenedAt)
+	// 4. 読むサイクルの頭から現在までをまとめて引き、2つのサイクルに振り分ける。
+	//    2回のQueryで、自分/相手 × 読む/書く の4組が揃う。
+	myPrevious, myCurrent, err := queryCycles(ctx, pairID, userID, meta)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to fetch kotozute"), nil
 	}
-	partnerItems, err := queryKotozuteForUser(ctx, pairID, partnerID, meta.LastOpenedAt)
+	partnerPrevious, partnerCurrent, err := queryCycles(ctx, pairID, partnerID, meta)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to fetch kotozute"), nil
 	}
@@ -137,7 +152,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	// 5. 相互ロック判定（純粋関数）でレスポンスを組み立てる。
-	return okJSON(buildThisWeekResponse(myItems, partnerItems, nextOpenAt))
+	return okJSON(buildThisWeekResponse(myPrevious, myCurrent, partnerPrevious, partnerCurrent, nextOpenAt))
 }
 
 // okJSON は thisWeekResponse を 200 のJSONレスポンスに変換する。
@@ -154,18 +169,25 @@ func okJSON(res thisWeekResponse) (events.APIGatewayProxyResponse, error) {
 }
 
 // buildThisWeekResponse はDynamoDBに依存しない純粋関数。相互ロック判定の核心。
-// canSeePartner=falseのときはPartnerKotozuteに一切触れない（本文を詰めるコードパス自体に到達しない）ことで、
-// 本文漏洩を構造的に避ける。
-func buildThisWeekResponse(myItems, partnerItems []kotozuteItem, nextOpenAt string) thisWeekResponse {
-	partnerHasWritten := len(partnerItems) > 0
-	partnerOpened := false
-	for _, it := range partnerItems {
-		if it.Opened {
-			partnerOpened = true
-			break
-		}
-	}
-	canSeePartner := len(myItems) > 0 && partnerOpened
+//
+// 引数は4組:
+//   - myPrevious      … 読むサイクルに自分が書いた分（今週ちゃんと書いた人かの判定に使う）
+//   - myCurrent       … 書くサイクルに自分が書いた分（画面に出す「今週のことづて」）
+//   - partnerPrevious … 読むサイクルの相手の分（解禁対象。相手の本文を返すのはここだけ）
+//   - partnerCurrent  … 書くサイクルの相手の分（気配表示の有無だけに使う）
+//
+// canSeePartner=false のときは PartnerKotozute に一切触れない（本文を詰めるコードパス自体に
+// 到達しない）ことで、本文漏洩を構造的に避ける。
+func buildThisWeekResponse(myPrevious, myCurrent, partnerPrevious, partnerCurrent []kotozuteItem, nextOpenAt string) thisWeekResponse {
+	// 読むサイクルに相手の分があれば「オープン済み」。バッチが区切りを進めた結果なので、
+	// ことづて1枚ごとのフラグを見る必要はない。
+	partnerOpened := len(partnerPrevious) > 0
+
+	// 自分は2つのサイクルのどちらかに書いていればよい。
+	// 読むサイクル … その週ちゃんと書いた人。オープン直後にそのまま読める。
+	// 書くサイクル … その週は書かなかったが、いま1枚書いた人。これで解禁される。
+	iHaveWritten := len(myPrevious) > 0 || len(myCurrent) > 0
+	canSeePartner := partnerOpened && iHaveWritten
 
 	openStatus := "before"
 	if partnerOpened {
@@ -173,14 +195,18 @@ func buildThisWeekResponse(myItems, partnerItems []kotozuteItem, nextOpenAt stri
 	}
 
 	res := thisWeekResponse{
-		MyKotozute:        toResponseItems(myItems),
-		OpenStatus:        openStatus,
-		CanSeePartner:     canSeePartner,
-		PartnerHasWritten: partnerHasWritten,
+		MyKotozute:    toResponseItems(myCurrent),
+		OpenStatus:    openStatus,
+		CanSeePartner: canSeePartner,
+		// 直前のサイクルは、次のオープンまで手元で読めるようにする（アーカイブにも残る）。
+		// 自分の分は常に返す。相手の分は解禁されたときだけ。
+		LastCycle: lastCycleBlock{Mine: toResponseItems(myPrevious)},
+		// 気配は「いま書いているサイクル」の話。枚数は返さない。
+		PartnerHasWritten: len(partnerCurrent) > 0,
 		NextOpenAt:        nextOpenAt,
 	}
 	if canSeePartner {
-		res.PartnerKotozute = toResponseItems(partnerItems)
+		res.LastCycle.Partner = toResponseItems(partnerPrevious)
 	}
 	return res
 }
@@ -193,13 +219,19 @@ func toResponseItems(items []kotozuteItem) []kotozuteResponseItem {
 	return res
 }
 
-// queryKotozuteForUser はPK=PAIR#<pairID>、SKが"KOTOZUTE#<userID>#"で始まりlastOpenedAt以降のアイテムを取得する。
-// DynamoDBは1つのソートキー属性に対して1条件式しか使えないため、begins_withと範囲条件を
-// 同時に満たすべくBETWEENで下限/上限を組み立てる（上限はUnicode上ほぼ最大の文字￿で
-// このuserIDプレフィックス内の最大値を保証する定石パターン）。
-func queryKotozuteForUser(ctx context.Context, pairID, userID, lastOpenedAt string) ([]kotozuteItem, error) {
-	lower := fmt.Sprintf("KOTOZUTE#%s#%s", userID, lastOpenedAt)
+// queryCycles は読むサイクルの頭から現在までを1回のQueryで引き、
+// cycleStartedAt を境に「読むサイクル」と「書くサイクル」へ振り分ける。
+//
+// SK は KOTOZUTE#<書いた人>#<ISO日時>#<id> で時刻が昇順に並ぶので、
+// 範囲検索がそのまま期間の切り出しになる。opened フラグでの絞り込みは不要。
+//
+// DynamoDBは1つのソートキーに1条件式しか使えないため、begins_with と範囲条件を
+// 同時に満たすべくBETWEENで組み立てる（上限のUnicode最大文字￿で、この書いた人の
+// プレフィックス内の最大値を保証する定石パターン）。
+func queryCycles(ctx context.Context, pairID, userID string, meta pairMeta) (previous, current []kotozuteItem, err error) {
+	lower := fmt.Sprintf("KOTOZUTE#%s#%s", userID, meta.PreviousCycleStartedAt)
 	upper := fmt.Sprintf("KOTOZUTE#%s#￿", userID)
+	boundary := fmt.Sprintf("KOTOZUTE#%s#%s", userID, meta.CycleStartedAt)
 
 	out, err := dynamoClient.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(tableName),
@@ -211,18 +243,27 @@ func queryKotozuteForUser(ctx context.Context, pairID, userID, lastOpenedAt stri
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	items := make([]kotozuteItem, 0, len(out.Items))
+	previous = make([]kotozuteItem, 0, len(out.Items))
+	current = make([]kotozuteItem, 0, len(out.Items))
 	for _, av := range out.Items {
+		sk, ok := av["SK"].(*types.AttributeValueMemberS)
+		if !ok {
+			continue
+		}
 		item, err := parseKotozuteItem(av)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		items = append(items, item)
+		if sk.Value < boundary {
+			previous = append(previous, item)
+		} else {
+			current = append(current, item)
+		}
 	}
-	return items, nil
+	return previous, current, nil
 }
 
 func parseKotozuteItem(av map[string]types.AttributeValue) (kotozuteItem, error) {
@@ -239,10 +280,6 @@ func parseKotozuteItem(av map[string]types.AttributeValue) (kotozuteItem, error)
 	if !ok {
 		return kotozuteItem{}, fmt.Errorf("body missing or invalid type")
 	}
-	opened, ok := av["opened"].(*types.AttributeValueMemberBOOL)
-	if !ok {
-		return kotozuteItem{}, fmt.Errorf("opened missing or invalid type")
-	}
 	createdAt, ok := av["createdAt"].(*types.AttributeValueMemberS)
 	if !ok {
 		return kotozuteItem{}, fmt.Errorf("createdAt missing or invalid type")
@@ -251,7 +288,6 @@ func parseKotozuteItem(av map[string]types.AttributeValue) (kotozuteItem, error)
 	return kotozuteItem{
 		ID:        parts[3],
 		Body:      body.Value,
-		Opened:    opened.Value,
 		CreatedAt: createdAt.Value,
 	}, nil
 }
@@ -274,17 +310,21 @@ func getPairMeta(ctx context.Context, pairID string) (pairMeta, error) {
 // itemが空（PAIR METAがまだ書き込まれていない）場合はデフォルト値を返す。
 func buildPairMetaFromItem(item map[string]types.AttributeValue) pairMeta {
 	meta := pairMeta{
-		LastOpenedAt:  defaultLastOpenedAt,
-		OpenDayOfWeek: defaultOpenDayOfWeek,
-		OpenTime:      defaultOpenTime,
-		Timezone:      defaultTimezone,
+		CycleStartedAt:         defaultCycleStartedAt,
+		PreviousCycleStartedAt: defaultCycleStartedAt,
+		OpenDayOfWeek:          defaultOpenDayOfWeek,
+		OpenTime:               defaultOpenTime,
+		Timezone:               defaultTimezone,
 	}
 	if len(item) == 0 {
 		return meta
 	}
 
-	if v, ok := item["lastOpenedAt"].(*types.AttributeValueMemberS); ok {
-		meta.LastOpenedAt = v.Value
+	if v, ok := item["cycleStartedAt"].(*types.AttributeValueMemberS); ok {
+		meta.CycleStartedAt = v.Value
+	}
+	if v, ok := item["previousCycleStartedAt"].(*types.AttributeValueMemberS); ok {
+		meta.PreviousCycleStartedAt = v.Value
 	}
 	if v, ok := item["openDayOfWeek"].(*types.AttributeValueMemberN); ok {
 		if n, err := strconv.Atoi(v.Value); err == nil {

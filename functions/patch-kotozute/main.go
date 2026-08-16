@@ -60,8 +60,8 @@ type kotozuteResponse struct {
 
 // foundKotozute は検索で見つけたことづての、更新に必要な情報。
 type foundKotozute struct {
-	SK     string
-	Opened bool
+	SK        string
+	CreatedAt string
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -100,32 +100,54 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	if found == nil {
 		return errorResponse(http.StatusNotFound, "kotozute not found"), nil
 	}
-	// 編集はオープン前のみ。オープン済みは確定扱いで編集不可。
-	if found.Opened {
+	// 編集できるのは「書くサイクル」のものだけ。オープン済みは確定扱いで編集不可。
+	cycleStartedAt, err := getCycleStartedAt(ctx, pairID)
+	if err != nil {
+		return errorResponse(http.StatusInternalServerError, "failed to fetch pair"), nil
+	}
+	if found.CreatedAt < cycleStartedAt {
 		return errorResponse(http.StatusConflict, "opened kotozute cannot be edited"), nil
 	}
 
-	// 本文のみ更新。検索と更新の間にバッチがオープンする競合に備え、opened=false を条件にする。
-	_, err = dynamoClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(tableName),
-		Key: map[string]types.AttributeValue{
-			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
-			"SK": &types.AttributeValueMemberS{Value: found.SK},
-		},
-		UpdateExpression:    aws.String("SET #body = :body"),
-		ConditionExpression: aws.String("#opened = :false"),
-		ExpressionAttributeNames: map[string]string{
-			"#body":   "body",
-			"#opened": "opened",
-		},
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":body":  &types.AttributeValueMemberS{Value: req.Body},
-			":false": &types.AttributeValueMemberBOOL{Value: false},
+	// 本文のみ更新。検索と更新の間にバッチが区切りを進める競合に備え、
+	// ペアの cycleStartedAt が変わっていないことを条件に付けたトランザクションで書く。
+	// （オープン済みかどうかはことづて単体では判定できず、ペアの区切りとの関係で決まるため）
+	_, err = dynamoClient.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			{
+				ConditionCheck: &types.ConditionCheck{
+					TableName: aws.String(tableName),
+					Key: map[string]types.AttributeValue{
+						"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+						"SK": &types.AttributeValueMemberS{Value: "META"},
+					},
+					ConditionExpression: aws.String("cycleStartedAt = :cycle"),
+					ExpressionAttributeValues: map[string]types.AttributeValue{
+						":cycle": &types.AttributeValueMemberS{Value: cycleStartedAt},
+					},
+				},
+			},
+			{
+				Update: &types.Update{
+					TableName: aws.String(tableName),
+					Key: map[string]types.AttributeValue{
+						"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+						"SK": &types.AttributeValueMemberS{Value: found.SK},
+					},
+					UpdateExpression: aws.String("SET #body = :body"),
+					ExpressionAttributeNames: map[string]string{
+						"#body": "body",
+					},
+					ExpressionAttributeValues: map[string]types.AttributeValue{
+						":body": &types.AttributeValueMemberS{Value: req.Body},
+					},
+				},
+			},
 		},
 	})
 	if err != nil {
-		var condErr *types.ConditionalCheckFailedException
-		if errors.As(err, &condErr) {
+		var canceled *types.TransactionCanceledException
+		if errors.As(err, &canceled) {
 			// 直前にオープンされた等で条件を満たさなくなった。
 			return errorResponse(http.StatusConflict, "opened kotozute cannot be edited"), nil
 		}
@@ -167,11 +189,11 @@ func findMyKotozute(ctx context.Context, pairID, userID, kotozuteID string) (*fo
 		if kotozuteIDFromSK(sk.Value) != kotozuteID {
 			continue
 		}
-		opened := false
-		if v, ok := item["opened"].(*types.AttributeValueMemberBOOL); ok {
-			opened = v.Value
+		createdAt := ""
+		if v, ok := item["createdAt"].(*types.AttributeValueMemberS); ok {
+			createdAt = v.Value
 		}
-		return &foundKotozute{SK: sk.Value, Opened: opened}, nil
+		return &foundKotozute{SK: sk.Value, CreatedAt: createdAt}, nil
 	}
 	return nil, nil
 }
@@ -187,6 +209,25 @@ func kotozuteIDFromSK(sk string) string {
 }
 
 // getUserPairID は USER#<userID>/META から pairId を読む。ペア未成立なら空文字を返す。
+// getCycleStartedAt は PAIR META から「書くサイクルの開始時刻」を読む。
+// これより後に書かれたことづてがまだオープンされていないもの。
+func getCycleStartedAt(ctx context.Context, pairID string) (string, error) {
+	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+			"SK": &types.AttributeValueMemberS{Value: "META"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if v, ok := out.Item["cycleStartedAt"].(*types.AttributeValueMemberS); ok {
+		return v.Value, nil
+	}
+	return "", nil
+}
+
 func getUserPairID(ctx context.Context, userID string) (string, error) {
 	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
