@@ -19,6 +19,40 @@ Globals:
           UserPoolArn: !GetAtt KotozuteUserPool.Arn
 
 Resources:
+  # メインテーブル（Single Table Design）。USER / PAIR / KOTOZUTE / INVITE を PK・SK で使い分ける。
+  # テーブル名は各 Lambda が const tableName = "kotozute" で直接参照しているため明示指定する
+  # （省略すると CloudFormation がランダムな接尾辞付きの名前を付けてコードと食い違う）。
+  KotozuteTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: kotozute
+      # 常時アクセスのない個人開発なので、キャパシティ予約せず使った分だけ払う。
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        # GSI1 のキー。属性定義に載せるのはキーに使う属性だけでよい。
+        - AttributeName: openDayOfWeek
+          AttributeType: N
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        # GSI①（曜日）: 週一バッチが「今日オープンすべきペア」を引くための索引。
+        # openDayOfWeek を持つのは PAIR の META だけなので、索引には自然とペアだけが載る（スパース索引）。
+        # Projection=ALL にして、バッチが member1/member2/lastOpenedAt を追加読み込みなしで得られるようにする。
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: openDayOfWeek
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      # GSI②（メール）はログイン実装時に追加する。現状コードから参照していないため定義しない。
+
   # Cognito ユーザープール（ユーザーの入れ物）。メール＋パスワードでログインできるようにする。
   KotozuteUserPool:
     Type: AWS::Cognito::UserPool
