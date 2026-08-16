@@ -108,8 +108,8 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	kotozuteID := uuid.NewString()
 
 	item := map[string]types.AttributeValue{
-		"PK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
-		"SK":        &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#%s#%s", userID, createdAt, kotozuteID)},
+		"PK":   &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pairID)},
+		"SK":   &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s#%s#%s", userID, createdAt, kotozuteID)},
 		"body": &types.AttributeValueMemberS{Value: req.Body},
 		// opened フラグは持たせない。オープン済みかどうかはペアの cycleStartedAt との
 		// 比較で決まるので、1枚ごとに状態を分散させない。
