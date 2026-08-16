@@ -105,7 +105,8 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	// 誰のことづてを見るか。partner の場合は PAIR META から相手を解決する。
 	targetUser := userID
 	partnerOnly := false
-	cycleStartedAt := ""
+	// 相手の分を見せてよい上限。読むサイクルより前＝すでに読み終えた分だけ。
+	openedBefore := ""
 	if q.Whose == "partner" {
 		members, err := getPairMembers(ctx, pairID)
 		if err != nil {
@@ -114,8 +115,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		targetUser = partnerUserID(members, userID)
 		partnerOnly = true
 
-		// オープン済みかどうかの判定に、書くサイクルの開始時刻が要る。
-		cycleStartedAt, err = getCycleStartedAt(ctx, pairID)
+		openedBefore, err = getPreviousCycleStartedAt(ctx, pairID)
 		if err != nil {
 			return errorResponse(http.StatusInternalServerError, "failed to fetch pair"), nil
 		}
@@ -137,12 +137,12 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	if startKey != nil {
 		input.ExclusiveStartKey = startKey
 	}
-	// 相手の過去分はオープン済みのみ見せる（過去ロックの緩和）。
-	// オープン済み ＝ 書くサイクルの開始より前に書かれたもの。
-	// まだ一度もオープンしていない場合（cycleStartedAt が空）は、見せられるものが無い。
+	// 相手の過去分は「読み終えたサイクル」だけ見せる（過去ロックの緩和）。
+	// いま解禁されているサイクルは相互ロックの対象なので、ここには出さない。
+	// 出すと、書いていない人がアーカイブ経由でロックを迂回できてしまう。
 	if partnerOnly {
-		input.FilterExpression = aws.String("createdAt < :cycleStartedAt")
-		input.ExpressionAttributeValues[":cycleStartedAt"] = &types.AttributeValueMemberS{Value: cycleStartedAt}
+		input.FilterExpression = aws.String("createdAt < :openedBefore")
+		input.ExpressionAttributeValues[":openedBefore"] = &types.AttributeValueMemberS{Value: openedBefore}
 	}
 
 	out, err := dynamoClient.Query(ctx, input)
@@ -281,9 +281,13 @@ func partnerUserID(members pairMembers, myUserID string) string {
 	return members.Member1
 }
 
-// getCycleStartedAt は PAIR META から「書くサイクルの開始時刻」を読む。
-// これより前に書かれたことづてがオープン済み。
-func getCycleStartedAt(ctx context.Context, pairID string) (string, error) {
+// getPreviousCycleStartedAt は PAIR META から「読むサイクルの開始時刻」を読む。
+//
+// アーカイブで相手の分を見せてよいのは、これより前に書かれたもの＝すでに読み終えた
+// サイクルまで。読むサイクル（[previousCycleStartedAt, cycleStartedAt)）は、いま
+// 相互ロックの対象になっているので、ここに含めてはいけない。
+// cycleStartedAt で絞ると読むサイクルまで入り、ロックを迂回して読めてしまう。
+func getPreviousCycleStartedAt(ctx context.Context, pairID string) (string, error) {
 	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
 		Key: map[string]types.AttributeValue{
@@ -294,7 +298,7 @@ func getCycleStartedAt(ctx context.Context, pairID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if v, ok := out.Item["cycleStartedAt"].(*types.AttributeValueMemberS); ok {
+	if v, ok := out.Item["previousCycleStartedAt"].(*types.AttributeValueMemberS); ok {
 		return v.Value, nil
 	}
 	return "", nil

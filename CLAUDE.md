@@ -57,7 +57,7 @@ GSI（2個）:
 ### 主なアクセスパターン
 - 書くサイクルの自分のことづて: `PK=USER#<自分>, SK BETWEEN KOTOZUTE#<cycleStartedAt> AND KOTOZUTE#￿`
 - 読むサイクルの相手のことづて: `PK=USER#<相手>, SK BETWEEN KOTOZUTE#<previousCycleStartedAt> AND KOTOZUTE#<cycleStartedAt>`
-- アーカイブ（月ごと）: `PK=USER#<誰か>, SK begins_with KOTOZUTE#<年月>`（相手は `cycleStartedAt` より前のみ＝オープン済み）
+- アーカイブ（月ごと）: `PK=USER#<誰か>, SK begins_with KOTOZUTE#<年月>`（相手は `previousCycleStartedAt` より前のみ）
 - ログイン: GSI② `PK=EMAIL#<addr>`
 - バッチ対象ペア検索: GSI① `PK=openDayOfWeek=5`
 - 自分の情報/ペア: `GetItem USER#<id>/META` → pairId 取得
@@ -173,8 +173,12 @@ EventBridge(曜日×時刻) → Lambda
 - 両者ゼロの週は通知しない。
 
 ### 過去ロックの緩和（現在は厳格・過去は寛容）
-- 今のサイクル：厳格（相互ロック）
-- アーカイブ（過去分）：オープン済みなら見られる（自分がその週書いたかは問わない）。実装は `GET /kotozute/archive?whose=partner` を `cycleStartedAt` より前で絞るだけ。
+- **読むサイクル**（いま解禁されている分）：厳格（相互ロック）。`GET /kotozute/this-week` だけが返す。
+- **それより前**（読み終えたサイクル）：寛容。オープン済みなら見られる（自分がその週書いたかは問わない）。
+
+実装は `GET /kotozute/archive?whose=partner` を **`previousCycleStartedAt` より前**で絞る。
+`cycleStartedAt` で絞ると読むサイクルまで入り、書いていない人がアーカイブ経由で
+相互ロックを迂回して読めてしまう（一度そうなっていた）。
 
 ### 状態遷移・編集/削除
 - ことづて：書く →（オープン前：下書き、本人のみ、編集可）→ 週一オープン → 確定（変更不可）
