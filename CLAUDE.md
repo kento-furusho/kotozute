@@ -39,8 +39,8 @@
 | PK | SK | 主な属性 |
 |---|---|---|
 | USER#<id> | META | email, displayName, apnsToken, pairId |
+| USER#<id> | KOTOZUTE#<ISO日時>#<ことづてid> | body, createdAt |
 | PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, timezone, status, cycleStartedAt, previousCycleStartedAt |
-| PAIR#<id> | KOTOZUTE#<書いた人id>#<ISO日時>#<ことづてid> | body, createdAt |
 | INVITE#<token> | META | inviterUserId, status, ttl |
 
 GSI（2個）:
@@ -48,13 +48,16 @@ GSI（2個）:
 - **GSI②（メール）**: EMAIL#<addr> を PK → ログイン時にメールからユーザーを特定
 
 補足:
+- **ことづては書いた人の下に置く**（`USER#<書いた人>`）。ペアの下ではない。理由は2つ:
+  - **ペア成立前にも書ける**。オンボーディングで「最初の1枚」を書いてから招待する導線が成立する
+  - **所有者がキーで表現される**。自分のパーティションしか引けないので、他人のことづてを編集する経路が構造的に存在しない
 - 「ユーザー→ペア」は USER の META に pairId を持たせて解決（1人1ペア前提、GSI不要）
 - 「招待」はトークンで直引き（GetItem）のため GSI 不要
 
 ### 主なアクセスパターン
-- 書くサイクルの自分のことづて: `PK=PAIR#<pair>, SK BETWEEN KOTOZUTE#<自分>#<cycleStartedAt> AND KOTOZUTE#<自分>#￿`
-- 読むサイクルの相手のことづて: `SK BETWEEN KOTOZUTE#<相手>#<previousCycleStartedAt> AND KOTOZUTE#<相手>#<cycleStartedAt>`
-- アーカイブ（月ごと）: `SK begins_with KOTOZUTE#<誰か>#<年月>`（相手は `cycleStartedAt` より前のみ＝オープン済み）
+- 書くサイクルの自分のことづて: `PK=USER#<自分>, SK BETWEEN KOTOZUTE#<cycleStartedAt> AND KOTOZUTE#￿`
+- 読むサイクルの相手のことづて: `PK=USER#<相手>, SK BETWEEN KOTOZUTE#<previousCycleStartedAt> AND KOTOZUTE#<cycleStartedAt>`
+- アーカイブ（月ごと）: `PK=USER#<誰か>, SK begins_with KOTOZUTE#<年月>`（相手は `cycleStartedAt` より前のみ＝オープン済み）
 - ログイン: GSI② `PK=EMAIL#<addr>`
 - バッチ対象ペア検索: GSI① `PK=openDayOfWeek=5`
 - 自分の情報/ペア: `GetItem USER#<id>/META` → pairId 取得
@@ -72,7 +75,7 @@ GSI（2個）:
 - `POST /invites/{token}/accept` — 招待を受けてペア成立
 - `GET /pair` — ペア情報
 - `PATCH /pair` — オープン曜日・時刻の変更
-- `POST /kotozute` — ことづてを書く
+- `POST /kotozute` — ことづてを書く（**ペア未成立でも書ける**）
 - `GET /kotozute/this-week` — 今週の状態をまとめて取る（相互ロック内包。下記）
 - `PATCH /kotozute/{id}` — 編集（オープン前・本文のみ。サーバーで可否判定）
 - `GET /kotozute/archive` — アーカイブ（カーソルページング）
@@ -138,7 +141,9 @@ previousCycleStartedAt        cycleStartedAt              現在
 
 - **読むサイクル** = `[previousCycleStartedAt, cycleStartedAt)`。直前に閉じた分。相手のことづてはここから返す。
 - **書くサイクル** = `[cycleStartedAt, 現在)`。いま書いている分。自分のことづては基本ここ。
-- 初回：ペア成立（invite accept）時に両方を **ペア成立日時** で初期化する（読むサイクルが空＝オープン前の状態）。
+- 初回：ペア成立（invite accept）時に両方を **遠い過去（1970-01-01）** で初期化する。
+  読むサイクルは空（＝オープン前）になり、**ペア成立前に書いた分も最初の書くサイクルに入る**。
+  成立日時で初期化すると、オンボーディングで書いた「最初の1枚」が最初のサイクルから外れてしまう。
 
 **区切りを2つにする理由**：1つだと、オープンした瞬間に「読むもの」と「書くもの」の区別がつかない。
 オープンでその1つの区切りを前に進めると、いま解禁したことづてが同時に範囲外へ出てしまい、

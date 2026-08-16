@@ -118,3 +118,28 @@ func TestHandler_Unauthorized(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusUnauthorized, response.StatusCode)
 	}
 }
+
+// SK からことづての id を取り出せること。
+// ことづての置き場所を PAIR# から USER# へ移したとき、この関数だけ古い分割数のままで
+// 全件が黙って捨てられ、200 で空配列が返っていた（気づきにくいので回帰防止）。
+func TestParseArchiveItem(t *testing.T) {
+	item, ok := parseArchiveItem(map[string]types.AttributeValue{
+		"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#2026-08-16T09:23:18Z#abc-123"},
+		"body":      &types.AttributeValueMemberS{Value: "ありがとう"},
+		"createdAt": &types.AttributeValueMemberS{Value: "2026-08-16T09:23:18Z"},
+	})
+	if !ok {
+		t.Fatal("正常なSKを弾いてしまった")
+	}
+	if item.ID != "abc-123" || item.Body != "ありがとう" {
+		t.Errorf("unexpected item: %+v", item)
+	}
+
+	for _, sk := range []string{"META", "KOTOZUTE#only-two"} {
+		if _, ok := parseArchiveItem(map[string]types.AttributeValue{
+			"SK": &types.AttributeValueMemberS{Value: sk},
+		}); ok {
+			t.Errorf("形式違いを受け取ってしまった: %s", sk)
+		}
+	}
+}

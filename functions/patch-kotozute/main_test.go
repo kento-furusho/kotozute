@@ -28,13 +28,13 @@ func TestKotozuteIDFromSK(t *testing.T) {
 	}{
 		{
 			name: "正常なSK",
-			sk:   "KOTOZUTE#k01#2026-08-08T10:00:00Z#abc-123",
+			sk:   "KOTOZUTE#2026-08-08T10:00:00Z#abc-123",
 			want: "abc-123",
 		},
 		{
-			name: "本文にidが含んでも末尾だけ取る",
-			sk:   "KOTOZUTE#k01#2026-08-08T10:00:00Z#uuid-with-hash",
-			want: "uuid-with-hash",
+			name: "idに#が含まれても末尾をまとめて取る",
+			sk:   "KOTOZUTE#2026-08-08T10:00:00Z#uuid-with#hash",
+			want: "uuid-with#hash",
 		},
 		{
 			name: "形式が違えば空",
@@ -43,7 +43,7 @@ func TestKotozuteIDFromSK(t *testing.T) {
 		},
 		{
 			name: "区切りが足りなければ空",
-			sk:   "KOTOZUTE#k01#only-three",
+			sk:   "KOTOZUTE#only-two",
 			want: "",
 		},
 	}

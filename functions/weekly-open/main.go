@@ -201,13 +201,15 @@ func openPair(ctx context.Context, pair pairMeta, now time.Time) error {
 	nowStr := now.UTC().Format(time.RFC3339)
 
 	// 通知の出し分けに「このサイクルで誰が書いたか」が要るので読むだけ読む。更新はしない。
-	// SK に書いた人が入っているので、SK だけ集めれば判定できる。
-	sks, err := queryCycleKotozuteSKs(ctx, pair)
+	// ことづては書いた人のパーティションにあるので、メンバーごとに1件あるかを見る。
+	wroteMember1, err := wroteInCycle(ctx, pair.Member1, pair.CycleStartedAt)
 	if err != nil {
 		return err
 	}
-	wroteMember1 := someoneWrote(sks, pair.Member1)
-	wroteMember2 := someoneWrote(sks, pair.Member2)
+	wroteMember2, err := wroteInCycle(ctx, pair.Member2, pair.CycleStartedAt)
+	if err != nil {
+		return err
+	}
 
 	if err := advanceCycle(ctx, pair, nowStr); err != nil {
 		return err
@@ -223,18 +225,6 @@ func openPair(ctx context.Context, pair pairMeta, now time.Time) error {
 		}
 	}
 	return nil
-}
-
-// someoneWrote は SK 群の中に、その userID が書いたことづてがあるかを返す。
-// SK は "KOTOZUTE#<書いた人>#..." なので、プレフィックスで判定できる純粋関数。
-func someoneWrote(sks []string, userID string) bool {
-	prefix := fmt.Sprintf("KOTOZUTE#%s#", userID)
-	for _, sk := range sks {
-		if strings.HasPrefix(sk, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 // buildNotifications は通知の出し分けを決める純粋関数。
@@ -277,30 +267,23 @@ func sendNotification(ctx context.Context, n notification) error {
 	return err
 }
 
-// queryCycleKotozuteSKs はいま閉じるサイクル（cycleStartedAt 以降）のことづての SK を集める。
-// 通知の出し分けに使うだけで、更新はしない。
-func queryCycleKotozuteSKs(ctx context.Context, pair pairMeta) ([]string, error) {
+// wroteInCycle は、そのユーザーがいま閉じるサイクル（cycleStartedAt 以降）に
+// 1枚でも書いたかを返す。通知の出し分けにしか使わないので、1件見つかれば十分。
+func wroteInCycle(ctx context.Context, userID, cycleStartedAt string) (bool, error) {
 	out, err := dynamoClient.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(tableName),
-		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),
-		FilterExpression:       aws.String("createdAt >= :since"),
+		KeyConditionExpression: aws.String("PK = :pk AND SK BETWEEN :lower AND :upper"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pair.PairID)},
-			":prefix": &types.AttributeValueMemberS{Value: "KOTOZUTE#"},
-			":since":  &types.AttributeValueMemberS{Value: pair.CycleStartedAt},
+			":pk":    &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
+			":lower": &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s", cycleStartedAt)},
+			":upper": &types.AttributeValueMemberS{Value: "KOTOZUTE#￿"},
 		},
+		Limit: aws.Int32(1),
 	})
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-
-	sks := make([]string, 0, len(out.Items))
-	for _, item := range out.Items {
-		if sk, ok := item["SK"].(*types.AttributeValueMemberS); ok {
-			sks = append(sks, sk.Value)
-		}
-	}
-	return sks, nil
+	return len(out.Items) > 0, nil
 }
 
 func getUserDisplayName(ctx context.Context, userID string) string {
