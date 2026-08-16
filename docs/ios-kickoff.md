@@ -126,20 +126,29 @@ JSON。日時は基本 ISO8601。`?` 付きフィールドは省略されうる�
     "myKotozute": [ { "id", "body", "createdAt" }, ... ],
     "openStatus": "before" | "opened",
     "canSeePartner": true,
-    "partnerKotozute": [ ... ],
+    "lastCycle": {
+      "mine":    [ { "id", "body", "createdAt" }, ... ],
+      "partner": [ ... ]
+    },
     "partnerHasWritten": true,
     "nextOpenAt": "2026-08-14T20:00"
   }
   ```
-- **`canSeePartner=false` のとき `partnerKotozute` は省略される**（本文はサーバーが返さない。クライアントで隠すのではなく、そもそも来ない）。
-- `partnerHasWritten` は 0枚か1枚以上かのみ（**枚数は返さない**）。相手0枚なら気配・ロック要素を一切出さないこと。
-- 画面分岐（自分視点）：
-  | 自分の今週 | 相手opened | 画面 |
-  |---|---|---|
-  | 1枚以上 | あり | 相手のことづてを見せる |
-  | 1枚以上 | なし | オープン前の待ち |
-  | 0枚 | あり | ロック（書くと見れる） |
-  | 0枚 | なし | 通常ホーム（気配を出さない） |
+- `myKotozute` は**いま書いているサイクル**の自分の分。
+- `lastCycle` は**直前にオープンされたサイクル**。次のオープンまで手元で読める（アーカイブにも残る）。
+  - `lastCycle.mine` は自分のものなので常に返る。
+  - **`canSeePartner=false` のとき `lastCycle.partner` はキーごと省略される**（本文はサーバーが返さない。クライアントで隠すのではなく、そもそも来ない）。
+- `partnerHasWritten` は「相手が**書くサイクル**に1枚以上書いたか」のみ（**枚数は返さない**）。相手0枚なら気配を一切出さないこと。
+- 画面分岐は **`canSeePartner` を起点に**決める。自分の枚数から推論しないこと。
+  「前のサイクルに書いた人は、いまのサイクルが0枚でも読める」ため、`myKotozute` が空でも
+  `canSeePartner=true` になりうる。枚数で判断すると、その人をロック画面へ送ってしまう。
+
+  | 条件 | 画面 |
+  |---|---|
+  | `canSeePartner=true` | 相手のことづてを見せる |
+  | `openStatus="opened"` かつ見せられない | ロック（書くと見られる） |
+  | `myKotozute` が1枚以上 | オープン前の待ち |
+  | それ以外 | 通常ホーム（気配を出さない） |
 
 ### PATCH /kotozute/{id}
 - Req: `{ "body": "書き直した本文" }`

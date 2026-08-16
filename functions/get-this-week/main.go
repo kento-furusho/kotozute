@@ -71,13 +71,25 @@ type kotozuteResponseItem struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// lastCycleBlock は直前にオープンされたサイクルの中身。
+// 次のオープンまで、ふたりぶんをそのまま手元で読めるようにする。
+type lastCycleBlock struct {
+	// 自分が書いた分。自分のものなので常に返す。
+	Mine []kotozuteResponseItem `json:"mine"`
+	// 相手が書いた分。canSeePartner のときだけキーごと現れる。
+	Partner []kotozuteResponseItem `json:"partner,omitempty"`
+}
+
 type thisWeekResponse struct {
-	MyKotozute        []kotozuteResponseItem `json:"myKotozute"`
-	OpenStatus        string                 `json:"openStatus"`
-	CanSeePartner     bool                   `json:"canSeePartner"`
-	PartnerKotozute   []kotozuteResponseItem `json:"partnerKotozute,omitempty"`
-	PartnerHasWritten bool                   `json:"partnerHasWritten"`
-	NextOpenAt        string                 `json:"nextOpenAt"`
+	// いま書いているサイクルの自分の分。
+	MyKotozute []kotozuteResponseItem `json:"myKotozute"`
+	OpenStatus string                 `json:"openStatus"`
+	// 相手の本文を見せてよいか。判断はサーバーで済ませる。
+	CanSeePartner bool           `json:"canSeePartner"`
+	LastCycle     lastCycleBlock `json:"lastCycle"`
+	// 相手がいま書いているサイクルに1枚以上書いたか。枚数は返さない。
+	PartnerHasWritten bool   `json:"partnerHasWritten"`
+	NextOpenAt        string `json:"nextOpenAt"`
 }
 
 type pairMeta struct {
@@ -110,6 +122,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 			MyKotozute:        []kotozuteResponseItem{},
 			OpenStatus:        "before",
 			CanSeePartner:     false,
+			LastCycle:         lastCycleBlock{Mine: []kotozuteResponseItem{}},
 			PartnerHasWritten: false,
 			NextOpenAt:        "",
 		})
@@ -160,7 +173,7 @@ func okJSON(res thisWeekResponse) (events.APIGatewayProxyResponse, error) {
 // 引数は4組:
 //   - myPrevious      … 読むサイクルに自分が書いた分（今週ちゃんと書いた人かの判定に使う）
 //   - myCurrent       … 書くサイクルに自分が書いた分（画面に出す「今週のことづて」）
-//   - partnerPrevious … 読むサイクルの相手の分（解禁対象。本文を返すのはここだけ）
+//   - partnerPrevious … 読むサイクルの相手の分（解禁対象。相手の本文を返すのはここだけ）
 //   - partnerCurrent  … 書くサイクルの相手の分（気配表示の有無だけに使う）
 //
 // canSeePartner=false のときは PartnerKotozute に一切触れない（本文を詰めるコードパス自体に
@@ -185,12 +198,15 @@ func buildThisWeekResponse(myPrevious, myCurrent, partnerPrevious, partnerCurren
 		MyKotozute:    toResponseItems(myCurrent),
 		OpenStatus:    openStatus,
 		CanSeePartner: canSeePartner,
+		// 直前のサイクルは、次のオープンまで手元で読めるようにする（アーカイブにも残る）。
+		// 自分の分は常に返す。相手の分は解禁されたときだけ。
+		LastCycle: lastCycleBlock{Mine: toResponseItems(myPrevious)},
 		// 気配は「いま書いているサイクル」の話。枚数は返さない。
 		PartnerHasWritten: len(partnerCurrent) > 0,
 		NextOpenAt:        nextOpenAt,
 	}
 	if canSeePartner {
-		res.PartnerKotozute = toResponseItems(partnerPrevious)
+		res.LastCycle.Partner = toResponseItems(partnerPrevious)
 	}
 	return res
 }
