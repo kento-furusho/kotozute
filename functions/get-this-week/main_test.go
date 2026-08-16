@@ -100,20 +100,20 @@ func TestBuildThisWeekResponse(t *testing.T) {
 			}
 
 			if tc.expectPartnerBody {
-				if len(res.PartnerKotozute) == 0 {
-					t.Fatalf("expected PartnerKotozute to be populated, got empty")
+				if len(res.LastCycle.Partner) == 0 {
+					t.Fatalf("expected LastCycle.Partner to be populated, got empty")
 				}
 			} else {
-				if len(res.PartnerKotozute) != 0 {
-					t.Errorf("expected PartnerKotozute to be empty (no body leak), got %+v", res.PartnerKotozute)
+				if len(res.LastCycle.Partner) != 0 {
+					t.Errorf("expected LastCycle.Partner to be empty (no body leak), got %+v", res.LastCycle.Partner)
 				}
 			}
 		})
 	}
 }
 
-// 「今週のことづて」として返すのは書くサイクルの分だけ。
-// 読むサイクルの自分の分は、ロック解除の判定に使うだけで画面には出さない（アーカイブ行き）。
+// myKotozute（「今週のことづて」）に入るのは書くサイクルの分だけ。
+// 読むサイクルの自分の分は lastCycle.mine に分けて返す。
 func TestBuildThisWeekResponse_MyKotozuteIsCurrentCycleOnly(t *testing.T) {
 	previous := []kotozuteItem{{ID: "old", Body: "先週の私", CreatedAt: "2026-08-01T09:00:00Z"}}
 	current := []kotozuteItem{{ID: "new", Body: "今週の私", CreatedAt: "2026-08-08T09:00:00Z"}}
@@ -138,9 +138,34 @@ func TestBuildThisWeekResponse_ReachableRightAfterOpen(t *testing.T) {
 	if !res.CanSeePartner {
 		t.Fatal("オープン直後に相手のことづてが見られない")
 	}
-	if len(res.PartnerKotozute) != 1 {
-		t.Errorf("PartnerKotozute = %+v, want 1 item", res.PartnerKotozute)
+	if len(res.LastCycle.Partner) != 1 {
+		t.Errorf("LastCycle.Partner = %+v, want 1 item", res.LastCycle.Partner)
 	}
+}
+
+// 直前のサイクルの自分の分は、次のオープンまで手元で読める（アーカイブ行きにしない）。
+func TestBuildThisWeekResponse_LastCycleMineIsAlwaysReturned(t *testing.T) {
+	myPrevious := []kotozuteItem{{ID: "m", Body: "先週の私", CreatedAt: "2026-08-01T09:00:00Z"}}
+
+	t.Run("相手が解禁されていても", func(t *testing.T) {
+		partnerPrevious := []kotozuteItem{{ID: "p", Body: "先週の相手", CreatedAt: "2026-08-01T10:00:00Z"}}
+		res := buildThisWeekResponse(myPrevious, nil, partnerPrevious, nil, "2026-08-14T20:00")
+		if len(res.LastCycle.Mine) != 1 {
+			t.Errorf("LastCycle.Mine = %+v, want 1 item", res.LastCycle.Mine)
+		}
+	})
+
+	t.Run("ロック中でも自分の分は見られる", func(t *testing.T) {
+		// 自分は書いていないが相手は書いた、というロック状態を作る。
+		partnerPrevious := []kotozuteItem{{ID: "p", Body: "先週の相手", CreatedAt: "2026-08-01T10:00:00Z"}}
+		res := buildThisWeekResponse(nil, nil, partnerPrevious, nil, "2026-08-14T20:00")
+		if res.CanSeePartner {
+			t.Fatal("ロック状態を作れていない")
+		}
+		if len(res.LastCycle.Partner) != 0 {
+			t.Errorf("相手の本文が漏れている: %+v", res.LastCycle.Partner)
+		}
+	})
 }
 
 func TestBuildThisWeekResponse_PartnerBodyNotSerializedWhenLocked(t *testing.T) {
@@ -154,8 +179,8 @@ func TestBuildThisWeekResponse_PartnerBodyNotSerializedWhenLocked(t *testing.T) 
 	if got := string(body); contains(got, "秘密の本文") {
 		t.Errorf("serialized response leaked partner body: %s", got)
 	}
-	if contains(string(body), "partnerKotozute") {
-		t.Errorf("expected partnerKotozute field to be omitted entirely, got %s", body)
+	if contains(string(body), `"partner"`) {
+		t.Errorf("expected lastCycle.partner field to be omitted entirely, got %s", body)
 	}
 }
 

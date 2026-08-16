@@ -80,16 +80,20 @@ GSI（2個）:
 ### GET /kotozute/this-week のレスポンス（相互ロック内包）
 ```json
 {
-  "myKotozute": [ ... 自分の今週分（常に見える）... ],
+  "myKotozute": [ ... 書くサイクルの自分の分（常に見える）... ],
   "openStatus": "before" | "opened",
   "canSeePartner": true,
-  "partnerKotozute": [ ... ],
+  "lastCycle": {
+    "mine":    [ ... 直前のサイクルの自分の分 ... ],
+    "partner": [ ... 直前のサイクルの相手の分 ... ]
+  },
   "partnerHasWritten": true,
   "nextOpenAt": "2026-06-19T20:00"
 }
 ```
-- `canSeePartner=false` のとき `partnerKotozute` は空/省略（本文を返さない）
-- `partnerHasWritten` は 0枚か1枚以上かのみ（枚数は返さない）
+- `lastCycle` は直前にオープンされたサイクル。**次のオープンまで手元で読める**（アーカイブにも残る）
+- `lastCycle.mine` は自分のものなので常に返す。`canSeePartner=false` のとき `lastCycle.partner` は**キーごと省略**（本文を返さない）
+- `partnerHasWritten` は「相手が**書くサイクル**に1枚以上書いたか」のみ（枚数は返さない）
 
 ### GET /kotozute/archive
 ```
