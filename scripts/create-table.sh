@@ -4,7 +4,7 @@
 #
 # GSI①（GSI1）: openDayOfWeek(N) を PK にした索引。週一バッチが「今日オープンすべきペア」を検索する。
 #   openDayOfWeek 属性を持つのは PAIR META だけなので、この索引には自然とペアだけが載る（スパース索引）。
-#   Projection=ALL にして、バッチが member1/member2/lastOpenedAt などを追加読み込みなしで得られるようにする。
+#   Projection=ALL にして、バッチが member1/member2/cycleStartedAt などを追加読み込みなしで得られるようにする。
 #
 # 注意：既にテーブルが存在する環境で GSI を後から足す場合は create ではなく
 #       `aws dynamodb update-table --global-secondary-index-updates '[{"Create":{...}}]'` を使う。

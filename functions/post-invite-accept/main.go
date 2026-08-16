@@ -191,7 +191,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 						"openTime":      &types.AttributeValueMemberS{Value: defaultOpenTime},
 						"timezone":      &types.AttributeValueMemberS{Value: defaultTimezone},
 						"status":        &types.AttributeValueMemberS{Value: "active"},
-						"lastOpenedAt":  &types.AttributeValueMemberS{Value: nowStr},
+						// サイクルの区切りは2つ。成立時は両方を同じ時刻にして、
+						// 読むサイクルを空（＝まだ何もオープンされていない）から始める。
+						"cycleStartedAt":         &types.AttributeValueMemberS{Value: nowStr},
+						"previousCycleStartedAt": &types.AttributeValueMemberS{Value: nowStr},
 					},
 					ConditionExpression: aws.String("attribute_not_exists(PK)"),
 				},

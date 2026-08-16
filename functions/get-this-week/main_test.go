@@ -10,59 +10,70 @@ import (
 )
 
 func TestBuildThisWeekResponse(t *testing.T) {
-	written := []kotozuteItem{{ID: "id1", Body: "私の本文", Opened: false, CreatedAt: "2026-08-01T09:00:00Z"}}
-	partnerOpened := []kotozuteItem{{ID: "id2", Body: "相手の本文", Opened: true, CreatedAt: "2026-08-01T10:00:00Z"}}
-	partnerNotOpened := []kotozuteItem{{ID: "id3", Body: "相手の本文2", Opened: false, CreatedAt: "2026-08-01T10:00:00Z"}}
+	mine := []kotozuteItem{{ID: "id1", Body: "私の本文", CreatedAt: "2026-08-01T09:00:00Z"}}
+	theirs := []kotozuteItem{{ID: "id2", Body: "相手の本文", CreatedAt: "2026-08-01T10:00:00Z"}}
 
 	testCases := []struct {
-		name                  string
-		myItems               []kotozuteItem
-		partnerItems          []kotozuteItem
+		name string
+		// 読むサイクル（直前に閉じた分）／書くサイクル（いま書いている分）
+		myPrevious            []kotozuteItem
+		myCurrent             []kotozuteItem
+		partnerPrevious       []kotozuteItem
+		partnerCurrent        []kotozuteItem
 		expectedCanSeePartner bool
 		expectedOpenStatus    string
 		expectedHasWritten    bool
 		expectPartnerBody     bool
 	}{
 		{
-			name:                  "自分1枚以上・相手opened → 相手のことづてを見せる",
-			myItems:               written,
-			partnerItems:          partnerOpened,
+			name:                  "書くサイクルに自分が書いた・相手はオープン済み → 相手のことづてを見せる",
+			myCurrent:             mine,
+			partnerPrevious:       theirs,
 			expectedCanSeePartner: true,
 			expectedOpenStatus:    "opened",
-			expectedHasWritten:    true,
+			expectedHasWritten:    false,
 			expectPartnerBody:     true,
 		},
 		{
-			name:                  "自分1枚以上・相手opened=false → オープン前の待ち",
-			myItems:               written,
-			partnerItems:          partnerNotOpened,
-			expectedCanSeePartner: false,
-			expectedOpenStatus:    "before",
-			expectedHasWritten:    true,
-			expectPartnerBody:     false,
+			// 通知文「今週のことづて、オープンしました」を受け取る人。
+			// 書くサイクルはまだ0枚でも、その週ちゃんと書いたので読める。
+			name:                  "読むサイクルに自分が書いた → 書くサイクル0枚でもそのまま読める",
+			myPrevious:            mine,
+			partnerPrevious:       theirs,
+			expectedCanSeePartner: true,
+			expectedOpenStatus:    "opened",
+			expectedHasWritten:    false,
+			expectPartnerBody:     true,
 		},
 		{
-			name:                  "自分0枚・相手opened → ロック（本文は見せない）",
-			myItems:               nil,
-			partnerItems:          partnerOpened,
+			// 通知文「あなたが1つ書くと、○○のことづても見られます」を受け取る人。
+			name:                  "どちらのサイクルにも自分が書いていない → ロック（本文は見せない）",
+			partnerPrevious:       theirs,
 			expectedCanSeePartner: false,
 			expectedOpenStatus:    "opened",
-			expectedHasWritten:    true,
+			expectedHasWritten:    false,
 			expectPartnerBody:     false,
 		},
 		{
-			name:                  "自分0枚・相手opened=false → 通常ホーム",
-			myItems:               nil,
-			partnerItems:          partnerNotOpened,
+			name:                  "自分1枚以上・読むサイクルに相手なし → オープン前の待ち",
+			myCurrent:             mine,
+			partnerCurrent:        theirs,
 			expectedCanSeePartner: false,
 			expectedOpenStatus:    "before",
 			expectedHasWritten:    true,
 			expectPartnerBody:     false,
 		},
 		{
-			name:                  "相手0枚 → 気配を出さない（partnerHasWritten=false）",
-			myItems:               written,
-			partnerItems:          nil,
+			name:                  "自分0枚・読むサイクルに相手なし → 通常ホーム",
+			partnerCurrent:        theirs,
+			expectedCanSeePartner: false,
+			expectedOpenStatus:    "before",
+			expectedHasWritten:    true,
+			expectPartnerBody:     false,
+		},
+		{
+			name:                  "相手が書くサイクルに0枚 → 気配を出さない",
+			myCurrent:             mine,
 			expectedCanSeePartner: false,
 			expectedOpenStatus:    "before",
 			expectedHasWritten:    false,
@@ -72,7 +83,11 @@ func TestBuildThisWeekResponse(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			res := buildThisWeekResponse(tc.myItems, tc.partnerItems, "2026-08-07T20:00")
+			res := buildThisWeekResponse(
+				tc.myPrevious, tc.myCurrent,
+				tc.partnerPrevious, tc.partnerCurrent,
+				"2026-08-07T20:00",
+			)
 
 			if res.CanSeePartner != tc.expectedCanSeePartner {
 				t.Errorf("CanSeePartner = %v, want %v", res.CanSeePartner, tc.expectedCanSeePartner)
@@ -97,9 +112,40 @@ func TestBuildThisWeekResponse(t *testing.T) {
 	}
 }
 
+// 「今週のことづて」として返すのは書くサイクルの分だけ。
+// 読むサイクルの自分の分は、ロック解除の判定に使うだけで画面には出さない（アーカイブ行き）。
+func TestBuildThisWeekResponse_MyKotozuteIsCurrentCycleOnly(t *testing.T) {
+	previous := []kotozuteItem{{ID: "old", Body: "先週の私", CreatedAt: "2026-08-01T09:00:00Z"}}
+	current := []kotozuteItem{{ID: "new", Body: "今週の私", CreatedAt: "2026-08-08T09:00:00Z"}}
+
+	res := buildThisWeekResponse(previous, current, nil, nil, "2026-08-14T20:00")
+
+	if len(res.MyKotozute) != 1 || res.MyKotozute[0].ID != "new" {
+		t.Errorf("MyKotozute = %+v, want only the current cycle item", res.MyKotozute)
+	}
+}
+
+// オープン直後でも相手のことづてが返ること。
+// 区切りを1つしか持たなかった頃は、オープンした瞬間に対象が範囲外へ出て
+// この状態に到達できなかった（回帰防止）。
+func TestBuildThisWeekResponse_ReachableRightAfterOpen(t *testing.T) {
+	// オープン直後：書くサイクルは双方まだ空。読むサイクルに双方の分がある。
+	myPrevious := []kotozuteItem{{ID: "m", Body: "私の本文", CreatedAt: "2026-08-01T09:00:00Z"}}
+	partnerPrevious := []kotozuteItem{{ID: "p", Body: "相手の本文", CreatedAt: "2026-08-01T10:00:00Z"}}
+
+	res := buildThisWeekResponse(myPrevious, nil, partnerPrevious, nil, "2026-08-14T20:00")
+
+	if !res.CanSeePartner {
+		t.Fatal("オープン直後に相手のことづてが見られない")
+	}
+	if len(res.PartnerKotozute) != 1 {
+		t.Errorf("PartnerKotozute = %+v, want 1 item", res.PartnerKotozute)
+	}
+}
+
 func TestBuildThisWeekResponse_PartnerBodyNotSerializedWhenLocked(t *testing.T) {
-	partnerNotOpened := []kotozuteItem{{ID: "id3", Body: "秘密の本文", Opened: false, CreatedAt: "2026-08-01T10:00:00Z"}}
-	res := buildThisWeekResponse(nil, partnerNotOpened, "2026-08-07T20:00")
+	partnerPrevious := []kotozuteItem{{ID: "id3", Body: "秘密の本文", CreatedAt: "2026-08-01T10:00:00Z"}}
+	res := buildThisWeekResponse(nil, nil, partnerPrevious, nil, "2026-08-07T20:00")
 
 	body, err := json.Marshal(res)
 	if err != nil {
@@ -128,14 +174,13 @@ func TestParseKotozuteItem(t *testing.T) {
 	valid := map[string]types.AttributeValue{
 		"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#k01#2026-08-01T09:00:00Z#uuid-1"},
 		"body":      &types.AttributeValueMemberS{Value: "ありがとう"},
-		"opened":    &types.AttributeValueMemberBOOL{Value: true},
 		"createdAt": &types.AttributeValueMemberS{Value: "2026-08-01T09:00:00Z"},
 	}
 	item, err := parseKotozuteItem(valid)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if item.ID != "uuid-1" || item.Body != "ありがとう" || !item.Opened || item.CreatedAt != "2026-08-01T09:00:00Z" {
+	if item.ID != "uuid-1" || item.Body != "ありがとう" || item.CreatedAt != "2026-08-01T09:00:00Z" {
 		t.Errorf("unexpected parsed item: %+v", item)
 	}
 
@@ -148,7 +193,6 @@ func TestParseKotozuteItem(t *testing.T) {
 			av: map[string]types.AttributeValue{
 				"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#k01"},
 				"body":      &types.AttributeValueMemberS{Value: "x"},
-				"opened":    &types.AttributeValueMemberBOOL{Value: false},
 				"createdAt": &types.AttributeValueMemberS{Value: "2026-08-01T09:00:00Z"},
 			},
 		},
@@ -157,16 +201,14 @@ func TestParseKotozuteItem(t *testing.T) {
 			av: map[string]types.AttributeValue{
 				"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#k01#2026-08-01T09:00:00Z#uuid-1"},
 				"body":      &types.AttributeValueMemberBOOL{Value: true},
-				"opened":    &types.AttributeValueMemberBOOL{Value: false},
 				"createdAt": &types.AttributeValueMemberS{Value: "2026-08-01T09:00:00Z"},
 			},
 		},
 		{
-			name: "opened missing",
+			name: "createdAt missing",
 			av: map[string]types.AttributeValue{
-				"SK":        &types.AttributeValueMemberS{Value: "KOTOZUTE#k01#2026-08-01T09:00:00Z#uuid-1"},
-				"body":      &types.AttributeValueMemberS{Value: "x"},
-				"createdAt": &types.AttributeValueMemberS{Value: "2026-08-01T09:00:00Z"},
+				"SK":   &types.AttributeValueMemberS{Value: "KOTOZUTE#k01#2026-08-01T09:00:00Z#uuid-1"},
+				"body": &types.AttributeValueMemberS{Value: "x"},
 			},
 		},
 	}
@@ -182,8 +224,11 @@ func TestParseKotozuteItem(t *testing.T) {
 func TestBuildPairMetaFromItem(t *testing.T) {
 	t.Run("empty item returns defaults", func(t *testing.T) {
 		meta := buildPairMetaFromItem(map[string]types.AttributeValue{})
-		if meta.LastOpenedAt != defaultLastOpenedAt {
-			t.Errorf("LastOpenedAt = %q, want %q", meta.LastOpenedAt, defaultLastOpenedAt)
+		if meta.CycleStartedAt != defaultCycleStartedAt {
+			t.Errorf("CycleStartedAt = %q, want %q", meta.CycleStartedAt, defaultCycleStartedAt)
+		}
+		if meta.PreviousCycleStartedAt != defaultCycleStartedAt {
+			t.Errorf("PreviousCycleStartedAt = %q, want %q", meta.PreviousCycleStartedAt, defaultCycleStartedAt)
 		}
 		if meta.OpenDayOfWeek != defaultOpenDayOfWeek {
 			t.Errorf("OpenDayOfWeek = %d, want %d", meta.OpenDayOfWeek, defaultOpenDayOfWeek)
@@ -198,14 +243,18 @@ func TestBuildPairMetaFromItem(t *testing.T) {
 
 	t.Run("real data overrides defaults", func(t *testing.T) {
 		item := map[string]types.AttributeValue{
-			"lastOpenedAt":  &types.AttributeValueMemberS{Value: "2026-07-25T20:00:00Z"},
-			"openDayOfWeek": &types.AttributeValueMemberN{Value: "3"},
-			"openTime":      &types.AttributeValueMemberS{Value: "21:30"},
-			"timezone":      &types.AttributeValueMemberS{Value: "UTC"},
+			"cycleStartedAt":         &types.AttributeValueMemberS{Value: "2026-07-25T20:00:00Z"},
+			"previousCycleStartedAt": &types.AttributeValueMemberS{Value: "2026-07-18T20:00:00Z"},
+			"openDayOfWeek":          &types.AttributeValueMemberN{Value: "3"},
+			"openTime":               &types.AttributeValueMemberS{Value: "21:30"},
+			"timezone":               &types.AttributeValueMemberS{Value: "UTC"},
 		}
 		meta := buildPairMetaFromItem(item)
-		if meta.LastOpenedAt != "2026-07-25T20:00:00Z" {
-			t.Errorf("LastOpenedAt = %q, want %q", meta.LastOpenedAt, "2026-07-25T20:00:00Z")
+		if meta.CycleStartedAt != "2026-07-25T20:00:00Z" {
+			t.Errorf("CycleStartedAt = %q, want %q", meta.CycleStartedAt, "2026-07-25T20:00:00Z")
+		}
+		if meta.PreviousCycleStartedAt != "2026-07-18T20:00:00Z" {
+			t.Errorf("PreviousCycleStartedAt = %q, want %q", meta.PreviousCycleStartedAt, "2026-07-18T20:00:00Z")
 		}
 		if meta.OpenDayOfWeek != 3 {
 			t.Errorf("OpenDayOfWeek = %d, want 3", meta.OpenDayOfWeek)

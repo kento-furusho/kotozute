@@ -1,5 +1,36 @@
 # 実装状況と次のステップ
 
+## 現在地（2026-08-16 時点・その3）
+
+初回の本番デプロイと iOS からの実結線を行い、その過程で見つかった設計の不整合を直した。
+
+### 本番デプロイ（ap-northeast-1・スタック名 `kotozute`）
+- `template.yaml` に `AWS::DynamoDB::Table`（PK/SK・GSI1・PAY_PER_REQUEST）を追加。
+  テーブルは `scripts/create-table.sh` で DynamoDB Local にしか作られておらず、
+  デプロイしても本番にテーブルが無く API が 500 を返していた。
+- デプロイ用の IAM ユーザーに EventBridge の権限が無く、週一バッチのルール作成で失敗していた
+  （`AWSLambda_FullAccess` には `events:*` が含まれない）。インラインポリシーで付与。
+- 認証の実挙動を確認：トークン無しは API Gateway が 401、`GET /invites/{token}` のみ公開。
+
+### サイクル境界の設計を見直した（重要）
+実データで通したところ、**オープンしたことづてが同じ瞬間に「今週」から出る**不整合が判明した。
+`lastOpenedAt` 1つで「読むもの」と「書くもの」の両方の境界を兼ねていたため、
+バッチがそれを前に進めると、いま解禁した分が範囲外になっていた。
+結果として画面4状態のうち ③ロック と ④相手のことづてを見せる に到達できなかった
+（＝相互ロックの「書けば見られる」側が一度も成立しない）。
+
+**直し方**：ペアが区切りを2つ持つ（`cycleStartedAt` / `previousCycleStartedAt`）。
+詳細は CLAUDE.md「サイクル境界」。あわせて **ことづての `opened` / `openedAt` を廃止**した。
+オープン済みかどうかはペアの区切りとの比較で決まるので、1枚ごとに状態を持たせない。
+
+- バッチは区切りを進める `UpdateItem` 1回だけになった（以前はことづて全件を更新）。
+- `patch-kotozute` の「オープン前のみ編集可」は、ペアの区切りが動いていないことを
+  条件にした `TransactWriteItems` で担保する（`opened=false` 条件の代わり）。
+- `get-archive` の `whose=partner` は `createdAt < cycleStartedAt` で絞る。
+
+**この変更は後方互換ではない**。旧スキーマのデータ（`lastOpenedAt` / `opened`）は読めないので、
+本番の動作確認用データは削除して作り直した。実ユーザーはまだいない。
+
 ## 現在地（2026-08-10 時点・その2）
 - SAM プロジェクト初期化済み（Go / provided.al2023 / arm64）。
 - Git 初期化・リモート登録・初回コミット済み。`.gitignore` 設定済み（`.aws-sam/` 等を除外）。
