@@ -323,11 +323,19 @@ func advanceCycle(ctx context.Context, pair pairMeta, nowStr string) error {
 			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pair.PairID)},
 			"SK": &types.AttributeValueMemberS{Value: "META"},
 		},
-		UpdateExpression:    aws.String("SET previousCycleStartedAt = :prev, cycleStartedAt = :now"),
+		// 区切りを進めると同時に、履歴にも積む。週ごとに遡るために要る。
+		UpdateExpression: aws.String(
+			"SET previousCycleStartedAt = :prev, cycleStartedAt = :now, " +
+				"cycleStarts = list_append(if_not_exists(cycleStarts, :empty), :appended)",
+		),
 		ConditionExpression: aws.String("cycleStartedAt = :prev"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":prev": &types.AttributeValueMemberS{Value: pair.CycleStartedAt},
-			":now":  &types.AttributeValueMemberS{Value: nowStr},
+			":prev":  &types.AttributeValueMemberS{Value: pair.CycleStartedAt},
+			":now":   &types.AttributeValueMemberS{Value: nowStr},
+			":empty": &types.AttributeValueMemberL{Value: []types.AttributeValue{}},
+			":appended": &types.AttributeValueMemberL{
+				Value: []types.AttributeValue{&types.AttributeValueMemberS{Value: nowStr}},
+			},
 		},
 	})
 	if err != nil {

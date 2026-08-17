@@ -63,6 +63,9 @@ type pairResponse struct {
 	Timezone      string      `json:"timezone"`
 	Status        string      `json:"status"`
 	NextOpenAt    string      `json:"nextOpenAt"`
+	// サイクルの区切り（古い順）。週ごとに遡って読むために返す。
+	// 隣り合う2つが1つの週の範囲になる。末尾は「いま書いているサイクル」の開始。
+	CycleStarts []string `json:"cycleStarts"`
 }
 
 // pairMeta はPAIR METAから読み出す、レスポンス生成に必要な値。
@@ -73,6 +76,7 @@ type pairMeta struct {
 	OpenTime      string
 	Timezone      string
 	Status        string
+	CycleStarts   []string
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -120,6 +124,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		Timezone:      meta.Timezone,
 		Status:        meta.Status,
 		NextOpenAt:    nextOpenAt,
+		CycleStarts:   meta.CycleStarts,
 	}
 
 	resBody, err := json.Marshal(res)
@@ -191,6 +196,21 @@ func buildPairMetaFromItem(item map[string]types.AttributeValue) *pairMeta {
 	}
 	if v, ok := item["openTime"].(*types.AttributeValueMemberS); ok {
 		meta.OpenTime = v.Value
+	}
+	if v, ok := item["cycleStarts"].(*types.AttributeValueMemberL); ok {
+		for _, entry := range v.Value {
+			if s, ok := entry.(*types.AttributeValueMemberS); ok {
+				meta.CycleStarts = append(meta.CycleStarts, s.Value)
+			}
+		}
+	}
+	// 履歴が無い古いペアは、持っている2つの区切りから組み立てる。
+	if len(meta.CycleStarts) == 0 {
+		for _, key := range []string{"previousCycleStartedAt", "cycleStartedAt"} {
+			if v, ok := item[key].(*types.AttributeValueMemberS); ok {
+				meta.CycleStarts = append(meta.CycleStarts, v.Value)
+			}
+		}
 	}
 	if v, ok := item["timezone"].(*types.AttributeValueMemberS); ok {
 		meta.Timezone = v.Value

@@ -40,7 +40,7 @@
 |---|---|---|
 | USER#<id> | META | email, displayName, apnsToken, pairId |
 | USER#<id> | KOTOZUTE#<ISO日時>#<ことづてid> | body, createdAt |
-| PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, timezone, status, cycleStartedAt, previousCycleStartedAt |
+| PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, timezone, status, cycleStartedAt, previousCycleStartedAt, cycleStarts |
 | INVITE#<token> | META | inviterUserId, status, ttl |
 
 GSI（2個）:
@@ -101,6 +101,7 @@ GSI（2個）:
 ### GET /kotozute/archive
 ```
 GET /kotozute/archive?whose=me|partner&year=2026&month=6&cursor=<不透明トークン>&limit=10
+GET /kotozute/archive?whose=me|partner&from=<ISO>&to=<ISO>          # 週ごとに引くとき（to は含まない）
 → { "items": [...], "nextCursor": "<続き>" | null }
 ```
 - Dynamo の LastEvaluatedKey を Base64 等で不透明化して cursor に使う
@@ -144,6 +145,10 @@ previousCycleStartedAt        cycleStartedAt              現在
 - 初回：ペア成立（invite accept）時に両方を **遠い過去（1970-01-01）** で初期化する。
   読むサイクルは空（＝オープン前）になり、**ペア成立前に書いた分も最初の書くサイクルに入る**。
   成立日時で初期化すると、オンボーディングで書いた「最初の1枚」が最初のサイクルから外れてしまう。
+
+**区切りの履歴（`cycleStarts`）**：オープンのたびに開始時刻を積んでいく（古い順）。
+隣り合う2つが1週間の範囲になる。直近2つだけでは過去の週を復元できず、
+壁を週ごとにたどれないため。カレンダーの週で代用すると、オープン曜日を変えたときにずれる。
 
 **区切りを2つにする理由**：1つだと、オープンした瞬間に「読むもの」と「書くもの」の区別がつかない。
 オープンでその1つの区切りを前に進めると、いま解禁したことづてが同時に範囲外へ出てしまい、

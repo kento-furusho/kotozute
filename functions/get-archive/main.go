@@ -54,7 +54,12 @@ func init() {
 	})
 }
 
+// 期間指定（from/to）があればそちらを使い、無ければ年月で引く。
+// 週ごとにたどる画面は from/to を、月ごとの画面は year/month を使う。
 type archiveQuery struct {
+	From string
+	To   string
+
 	Whose  string // "me" | "partner"
 	Year   int
 	Month  int
@@ -121,18 +126,25 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		}
 	}
 
-	// ことづては書いた人のパーティションにある。SK は KOTOZUTE#<ISO日時>#<id> で、
-	// ISO日時は "2026-08-..." なので、年月プレフィックスで begins_with すればその月に絞れる。
-	skPrefix := fmt.Sprintf("KOTOZUTE#%04d-%02d", q.Year, q.Month)
-
+	// ことづては書いた人のパーティションにある。SK は KOTOZUTE#<ISO日時>#<id>。
 	input := &dynamodb.QueryInput{
-		TableName:              aws.String(tableName),
-		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),
+		TableName: aws.String(tableName),
+		Limit:     aws.Int32(int32(q.Limit)),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", targetUser)},
-			":prefix": &types.AttributeValueMemberS{Value: skPrefix},
+			":pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", targetUser)},
 		},
-		Limit: aws.Int32(int32(q.Limit)),
+	}
+	if q.From != "" {
+		// 週の範囲。to は含めない（次の週の始まりなので）。
+		input.KeyConditionExpression = aws.String("PK = :pk AND SK BETWEEN :from AND :to")
+		input.ExpressionAttributeValues[":from"] = &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s", q.From)}
+		input.ExpressionAttributeValues[":to"] = &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s", q.To)}
+	} else {
+		// ISO日時は "2026-08-..." なので、年月プレフィックスで begins_with すればその月に絞れる。
+		input.KeyConditionExpression = aws.String("PK = :pk AND begins_with(SK, :prefix)")
+		input.ExpressionAttributeValues[":prefix"] = &types.AttributeValueMemberS{
+			Value: fmt.Sprintf("KOTOZUTE#%04d-%02d", q.Year, q.Month),
+		}
 	}
 	if startKey != nil {
 		input.ExclusiveStartKey = startKey
@@ -184,17 +196,28 @@ func parseArchiveQuery(params map[string]string) (archiveQuery, string) {
 		q.Whose = w
 	}
 
-	year, err := strconv.Atoi(params["year"])
-	if err != nil || year < 2000 || year > 2100 {
-		return archiveQuery{}, "year is required and must be valid"
-	}
-	q.Year = year
+	q.From = params["from"]
+	q.To = params["to"]
+	if q.From != "" || q.To != "" {
+		if q.From == "" || q.To == "" {
+			return archiveQuery{}, "from and to must be given together"
+		}
+		if q.From >= q.To {
+			return archiveQuery{}, "from must be before to"
+		}
+	} else {
+		year, err := strconv.Atoi(params["year"])
+		if err != nil || year < 2000 || year > 2100 {
+			return archiveQuery{}, "year is required and must be valid"
+		}
+		q.Year = year
 
-	month, err := strconv.Atoi(params["month"])
-	if err != nil || month < 1 || month > 12 {
-		return archiveQuery{}, "month is required and must be between 1 and 12"
+		month, err := strconv.Atoi(params["month"])
+		if err != nil || month < 1 || month > 12 {
+			return archiveQuery{}, "month is required and must be between 1 and 12"
+		}
+		q.Month = month
 	}
-	q.Month = month
 
 	if l, ok := params["limit"]; ok && l != "" {
 		limit, err := strconv.Atoi(l)
