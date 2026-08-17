@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -139,6 +140,22 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}, nil
 }
 
+// sortedUnique は重複を取り除いて古い順に並べる。
+// ISO8601 の文字列は辞書順が時刻順と一致するので、文字列のまま並べてよい。
+func sortedUnique(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // getUserPairID は USER#<userID>/META から pairId を読む。ペア未成立なら空文字を返す。
 func getUserPairID(ctx context.Context, userID string) (string, error) {
 	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
@@ -204,14 +221,15 @@ func buildPairMetaFromItem(item map[string]types.AttributeValue) *pairMeta {
 			}
 		}
 	}
-	// 履歴が無い古いペアは、持っている2つの区切りから組み立てる。
-	if len(meta.CycleStarts) == 0 {
-		for _, key := range []string{"previousCycleStartedAt", "cycleStartedAt"} {
-			if v, ok := item[key].(*types.AttributeValueMemberS); ok {
-				meta.CycleStarts = append(meta.CycleStarts, v.Value)
-			}
+	// 直近2つの区切りは必ず含める。
+	// 履歴を持たない古いペアや、履歴の記録を始める前のオープン分を取りこぼさないため
+	// （list_append は属性が無いところから始まるので、それ以前の区切りが履歴に入らない）。
+	for _, key := range []string{"previousCycleStartedAt", "cycleStartedAt"} {
+		if v, ok := item[key].(*types.AttributeValueMemberS); ok {
+			meta.CycleStarts = append(meta.CycleStarts, v.Value)
 		}
 	}
+	meta.CycleStarts = sortedUnique(meta.CycleStarts)
 	if v, ok := item["timezone"].(*types.AttributeValueMemberS); ok {
 		meta.Timezone = v.Value
 	}

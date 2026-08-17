@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +60,10 @@ type pairMeta struct {
 	OpenTime       string
 	Timezone       string
 	CycleStartedAt string
+	// 直前の区切り。履歴を持たない古いペアの取りこぼしを埋めるために読む。
+	PreviousCycleStartedAt string
+	// 区切りの履歴（古い順）。週ごとに遡るために使う。
+	CycleStarts []string
 }
 
 // handler は EventBridge から定期起動される。API Gateway からは呼ばれないので
@@ -188,6 +193,16 @@ func buildPairMeta(item map[string]types.AttributeValue) pairMeta {
 	if v, ok := item["cycleStartedAt"].(*types.AttributeValueMemberS); ok {
 		p.CycleStartedAt = v.Value
 	}
+	if v, ok := item["previousCycleStartedAt"].(*types.AttributeValueMemberS); ok {
+		p.PreviousCycleStartedAt = v.Value
+	}
+	if v, ok := item["cycleStarts"].(*types.AttributeValueMemberL); ok {
+		for _, e := range v.Value {
+			if s, ok := e.(*types.AttributeValueMemberS); ok {
+				p.CycleStarts = append(p.CycleStarts, s.Value)
+			}
+		}
+	}
 	return p
 }
 
@@ -312,6 +327,36 @@ func getUserAttr(ctx context.Context, userID, attr string) string {
 	return ""
 }
 
+// nextCycleStarts はオープン後の区切りの履歴を組み立てる。
+//
+// 履歴に加えて、ペアが持っている2つの区切りも必ず混ぜる。
+// 履歴を後から足した都合で、それ以前の区切りが履歴に入っていないペアがあるため。
+// ISO8601 の文字列は辞書順が時刻順と一致するので、文字列のまま並べてよい。
+func nextCycleStarts(pair pairMeta, nowStr string) []string {
+	all := append([]string{}, pair.CycleStarts...)
+	all = append(all, pair.PreviousCycleStartedAt, pair.CycleStartedAt, nowStr)
+
+	seen := map[string]bool{}
+	out := make([]string, 0, len(all))
+	for _, v := range all {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func cycleStartsValue(starts []string) types.AttributeValue {
+	values := make([]types.AttributeValue, 0, len(starts))
+	for _, s := range starts {
+		values = append(values, &types.AttributeValueMemberS{Value: s})
+	}
+	return &types.AttributeValueMemberL{Value: values}
+}
+
 // advanceCycle は区切りを1つ前へ進める。オープン処理の実体はこれだけ。
 //
 // 条件式で「読み取った時点の cycleStartedAt から変わっていないこと」を確かめる。
@@ -323,19 +368,15 @@ func advanceCycle(ctx context.Context, pair pairMeta, nowStr string) error {
 			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("PAIR#%s", pair.PairID)},
 			"SK": &types.AttributeValueMemberS{Value: "META"},
 		},
-		// 区切りを進めると同時に、履歴にも積む。週ごとに遡るために要る。
-		UpdateExpression: aws.String(
-			"SET previousCycleStartedAt = :prev, cycleStartedAt = :now, " +
-				"cycleStarts = list_append(if_not_exists(cycleStarts, :empty), :appended)",
-		),
+		// 区切りを進めると同時に、履歴も書き直す。
+		// list_append で継ぎ足すのではなく毎回まるごと書くのは、
+		// 履歴を持たずに始まったペアの区切りを取りこぼさないため。
+		UpdateExpression:    aws.String("SET previousCycleStartedAt = :prev, cycleStartedAt = :now, cycleStarts = :starts"),
 		ConditionExpression: aws.String("cycleStartedAt = :prev"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":prev":  &types.AttributeValueMemberS{Value: pair.CycleStartedAt},
-			":now":   &types.AttributeValueMemberS{Value: nowStr},
-			":empty": &types.AttributeValueMemberL{Value: []types.AttributeValue{}},
-			":appended": &types.AttributeValueMemberL{
-				Value: []types.AttributeValue{&types.AttributeValueMemberS{Value: nowStr}},
-			},
+			":prev":   &types.AttributeValueMemberS{Value: pair.CycleStartedAt},
+			":now":    &types.AttributeValueMemberS{Value: nowStr},
+			":starts": cycleStartsValue(nextCycleStarts(pair, nowStr)),
 		},
 	})
 	if err != nil {
