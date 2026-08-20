@@ -1,6 +1,53 @@
 # 実装状況と次のステップ
 
-## 現在地（2026-08-16 時点・その3）
+> **この文書の読み方**：「現在地」は日付ごとの追記ログ。**いちばん上が最新**で、
+> それより下は当時の記録なので、いまの実装と食い違う記述が含まれる（`lastOpenedAt`・
+> `opened` フラグ・`p01`/`k01` 固定値など、すでに廃止したものの話が出てくる）。
+> 迷ったら CLAUDE.md を正とし、この文書は「なぜそうなったか」の経緯として読む。
+
+## 現在地（2026-08-20 時点・その4）
+
+iOS クライアントを一通り作り、実データで通す過程で見つかった穴を塞いだ。
+バックエンドは全12本＋バッチがデプロイ済みで、iOS から実際に動いている。
+
+### アーカイブが相互ロックを迂回できていた（セキュリティ）
+`GET /kotozute/archive?whose=partner` の絞り込みが `createdAt < cycleStartedAt` だった。
+これでは**いま解禁されている読むサイクル**まで範囲に入り、その週に1枚も書いていない人が
+アーカイブ経由で相手のことづてを読めていた。`previousCycleStartedAt` より前で絞るよう修正。
+
+- **厳格なのは読むサイクルだけ**。それを返すのは `GET /kotozute/this-week` のみ。
+- アーカイブは「読み終えたサイクル」だけを扱う。ここは寛容（自分がその週書いたかは問わない）。
+
+### 壁を週ごとにたどれるようにした
+- ペアの META に区切りの履歴 `cycleStarts`（古い順の文字列リスト）を追加。隣り合う2つが1週間。
+  直近2つの区切りだけでは過去の週を復元できない。カレンダーの週で代用すると
+  オープン曜日を変えたときにずれる。
+- `GET /pair` が `cycleStarts` を返す。
+- `GET /kotozute/archive` が `from`/`to`（RFC3339）を受け取れるようになった（`year`/`month` も従来通り）。
+
+**履歴の取りこぼしを直した**：履歴は後から足した機能なので、それ以前からあるペアには属性が無い。
+`list_append(if_not_exists(cycleStarts, []))` だと空から始まって今回の区切りだけが積まれ、
+それまでの区切りが消えた（実際にそうなった）。継ぎ足しをやめ、`weekly-open` が読み取った
+2つの区切りも混ぜて履歴を丸ごと書き直す形にした（オープンのたびに自動修復される）。
+`get-pair` も応答で2つの区切りを必ず混ぜる（まだ書き直されていないペア向けの保険）。
+
+**`from`/`to` は UTC に正規化してから使う**。SK の範囲比較は文字列の辞書順なので、
+`2026-08-17T21:00:22+09:00` と `2026-08-17T12:00:22Z` は同じ時刻でも文字列としては
+順序が違い、間のことづてが黙って落ちる。時刻として読んでから UTC で書き直し、
+読めなければ 400 を返す。
+
+### iOS（別リポジトリ `kotozute-ios`）
+- Swift Package を2つに分割：`KotozuteAPI`（依存ゼロ・テスト可能）と `KotozuteAuth`（aws-sdk-swift）。
+  Amplify は使わず素の AWS SDK for Swift。Cognito は `USER_PASSWORD_AUTH`（SDK に SRP のヘルパーが無いため）。
+- API 12本すべてクライアント側に実装済み。画面は 書く／見る／設定 の3タブ、
+  招待する側・される側の両導線、オンボーディング、詳細表示、オープン演出まで揃っている。
+- 通知（APNs）だけ未着手。`PATCH /me` で `apnsToken` を送る導線がまだ無い。
+
+### 運用メモ
+- ローカルの DynamoDB Local は GSI 追加前に作ったテーブルが残っていることがある。
+  作り直さず `update-table` で GSI を足す（コマンドは CLAUDE.md「ローカル開発コマンド」）。
+
+## 現在地（2026-08-16 時点・その3）※当時の記録
 
 初回の本番デプロイと iOS からの実結線を行い、その過程で見つかった設計の不整合を直した。
 
@@ -31,7 +78,7 @@
 **この変更は後方互換ではない**。旧スキーマのデータ（`lastOpenedAt` / `opened`）は読めないので、
 本番の動作確認用データは削除して作り直した。実ユーザーはまだいない。
 
-## 現在地（2026-08-10 時点・その2）
+## 現在地（2026-08-10 時点・その2）※当時の記録。`lastOpenedAt`・`opened`・固定値 `p01`/`k01` はすべて廃止済み
 - SAM プロジェクト初期化済み（Go / provided.al2023 / arm64）。
 - Git 初期化・リモート登録・初回コミット済み。`.gitignore` 設定済み（`.aws-sam/` 等を除外）。
 - DynamoDB Local を Docker で起動し、`scripts/create-table.sh` でメインテーブル `kotozute`（PK/SK）を作成済み。
@@ -91,7 +138,8 @@
 ## プロジェクト構成（現状）
 ```
 kotozute/
-├── template.yaml               # SAM。Cognito(UserPool/Client) + 12関数 + Authorizer を定義
+├── template.yaml               # SAM。DynamoDB テーブル(PK/SK/GSI1) + Cognito(UserPool/Client)
+│                               #      + 12関数 + weekly-open + Authorizer を定義
 ├── .github/workflows/ci.yml    # CI：関数ごとに gofmt/vet/build/test
 ├── functions/
 │   ├── post-users/             # POST /users
@@ -110,13 +158,19 @@ kotozute/
 │       （各ディレクトリに main.go / main_test.go / go.mod / go.sum）
 ├── events/                     # sam local invoke 用サンプルイベント（関数ごと・認証claims入り）
 ├── scripts/
-│   ├── create-table.sh         # DynamoDB Local にメインテーブルを作成（ダミーキー、CLI直接用）
+│   ├── create-table.sh         # DynamoDB Local にメインテーブル+GSI1 を作成（ダミーキー、CLI直接用）
 │   └── db-admin.sh             # dynamodb-admin（GUI）をダミーキーで起動（CLI直接用）
 ├── env.json                    # ローカル用 DYNAMODB_ENDPOINT（gitignore済み。各自作成する）
 ├── Makefile
 ├── CLAUDE.md                   # プロジェクト指示書（先に読む）
+├── docs/
+│   ├── ios-kickoff.md          # iOS 向け引き継ぎ資料（エンドポイントの Request/Response）
+│   └── design/                 # 画面デザイン（Claude Design の HTML とスライド）
 └── IMPLEMENTATION.md           # このファイル
 ```
+
+iOS クライアントは別リポジトリ `kotozute-ios`（SwiftUI / XcodeGen）。
+`KotozuteAPI`（依存ゼロ）と `KotozuteAuth`（aws-sdk-swift）の2パッケージに分かれている。
 
 ### ローカルで動かす
 ```bash
@@ -144,24 +198,27 @@ curl http://127.0.0.1:3000/kotozute/this-week
 
 ## 次にやること（順序）
 
-### 1. 認証（Cognito）を被せる — ✅ 実装済み（デプロイ確認は残）
-- ユーザープール作成・Authorizer 割り当て・固定値のトークン起点への差し替えは完了（詳細は「現在地」参照）。
-- 残タスク：(a) `sam` のある環境でデプロイし、トークン無し→401・正規トークンで通ることを実地確認。(b) User Pool に `EmailConfiguration` を足して確認メールを SES 経由に切り替え（今は Cognito デフォルト送信・1日50通制限）。(c) iOS 側に `UserPoolId`/`UserPoolClientId` を渡してログインを構成。
+### 1〜3（認証・残りAPI・週一バッチ） — ✅ 完了
+デプロイして実地確認済み。トークン無し→401、API 全12本、GSI1 でのペア検索、
+オープンでの区切り前進まで、本番の実データで通っている。
 
-### 2. 残りのAPI（PATCH系・GET /pair・アーカイブ） — ✅ 実装済み
-- `PATCH /me`・`GET /pair`・`PATCH /pair`・`PATCH /kotozute/{id}`・`GET /kotozute/archive` を実装済み（詳細は「現在地」参照）。これで API は全12本が揃った。
-- 残タスク：デプロイ後の実地確認（認証まわりと同様、`sam` のある環境で）。
+### 4. 通知の実配信 — ⬜ 次にやる
+いまは `weekly-open` が通知内容を組み立ててログに出すだけで、実際には飛ばない。要るのは:
+- **Apple Developer 側の作業**（古荘さんの手が必要）：APNs 認証キーの発行。
+- SNS プラットフォームアプリケーション（APNs）の作成。
+- iOS：通知の許可を求め、デバイストークンを `PATCH /me` の `apnsToken` で送る導線。
+  **API クライアントに `updateMe` はあるが、アプリからまだ一度も呼んでいない。**
+- バックエンド：`apnsToken` 受領時に SNS エンドポイントを作り、
+  USER META の `snsEndpointArn` に保存する。`weekly-open` の `sendNotification` は
+  この属性を見るところまで実装済みなので、埋まれば飛ぶ。
 
-### 3. 週一オープンのバッチ — ✅ 実装済み
-- GSI①・バッチ本体・オープン処理・通知の出し分けまで実装済み（詳細は「現在地」参照）。
-- 残タスク：デプロイして EventBridge の実起動・GSI クエリ・オープン挙動を実地確認。
-
-### 4. 本番デプロイ・通知の実配信・その他（残り）
-- **デプロイ全般**：`sam` のある環境で `sam build && sam deploy`。認証(401)・API・バッチの実挙動を確認。本番テーブル/GSI は現状 IaC 外なので、`template.yaml` への `AWS::DynamoDB::Table` 追加を検討。
-- **通知の実配信**：APNs 証明書設定＋SNS プラットフォームアプリ作成。APNs トークン→SNS エンドポイントARN を作り USER META の `snsEndpointArn` に保存する導線（`PATCH /me` の apnsToken 受領時など）。これが入ると weekly-open の通知が実際に飛ぶ。
-- **メール**：User Pool の確認メールを SES 経由に切り替え。
-- **iOS**：`UserPoolId`/`UserPoolClientId` を渡してログイン構成。
-- **GSI②（メール）**：Cognito 以外のログイン経路を作る場合に追加。
+### 5. その他（急がない）
+- **メール**：Cognito の確認メールを SES 経由へ。いまはデフォルト送信（1日50通・汎用の差出人）。
+  独自ドメインを取ってからでよい。
+- **GSI②（メール）**：Cognito 以外のログイン経路を作る場合のみ。今はコードから参照していない。
+- **マルチタイムゾーン**：バッチの曜日判定は Asia/Tokyo 基準。ふたりが別の国にいる場合の扱いは未定。
+- **iOS の死にコード**：`archive(whose:year:month:)` は月ごとのアーカイブ画面を消してから
+  どこからも呼ばれていない。API 側は残す価値があるので、Swift 側だけ整理するか判断する。
 
 ## 設計の出典
 全仕様は Notion「ことづて」設計ドキュメント（開発ページ配下）にある。矛盾があれば Notion を正とする。主要点は CLAUDE.md に転記済み。
@@ -171,5 +228,9 @@ curl http://127.0.0.1:3000/kotozute/this-week
 - 相互ロックはサーバー側判定・本文を返さない（セキュリティ）。
 - 削除は実装しない。編集はオープン前・本文のみ。
 - 気配は「存在のみ」、枚数は出さない、相手0枚は無言。
-- 「今週」はカレンダー週でなく lastOpenedAt 境界。
+- 「今週」はカレンダー週でなく**オープン日**が境界。ペアが区切りを2つ持つ
+  （`cycleStartedAt` / `previousCycleStartedAt`）。ことづてに `opened` フラグは持たせない。
+- 過去の週をたどるための区切りの履歴は `cycleStarts`。オープンのたびに丸ごと書き直す。
+- アーカイブで相手の分を見せてよいのは `previousCycleStartedAt` より前だけ
+  （読むサイクルを含めると相互ロックを迂回できる）。
 - DynamoDBの予約語（`status`, `ttl`など）はUpdate/ConditionExpressionで直接使わず、必ず`ExpressionAttributeNames`でエイリアスする。

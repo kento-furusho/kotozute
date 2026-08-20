@@ -243,4 +243,13 @@ sam local invoke --env-vars env.json
 sam local start-api --env-vars env.json   # http://127.0.0.1:3000 でAPIを立てる
 ```
 
-**未対応**：GSI①②はまだ `scripts/create-table.sh` に定義していない。GSI を使う機能（ログイン、バッチ）実装時に、このスクリプトへ GSI 定義を追加すること。
+**GSI について**：GSI①（曜日）は `scripts/create-table.sh` と `template.yaml` の両方に定義済み。
+GSI②（メール）は、Cognito 以外のログイン経路を作るときに追加する（今はコードから参照していない）。
+
+既にテーブルがある環境に GSI を後から足すときは、作り直さず `update-table` を使う:
+```bash
+AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local AWS_REGION=ap-northeast-1 \
+aws dynamodb update-table --table-name kotozute --endpoint-url http://localhost:8000 \
+  --attribute-definitions AttributeName=openDayOfWeek,AttributeType=N \
+  --global-secondary-index-updates '[{"Create":{"IndexName":"GSI1","KeySchema":[{"AttributeName":"openDayOfWeek","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}}]'
+```
