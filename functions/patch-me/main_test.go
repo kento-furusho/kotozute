@@ -173,3 +173,41 @@ func TestExistingEndpointARN(t *testing.T) {
 		})
 	}
 }
+
+// 空を通すと、相手の画面の「◯◯からのことづて」やロック画面の文言が崩れる。
+// 日本語はバイト数だとすぐ上限に当たるので、文字数で数えていることも確かめる。
+func TestValidateDisplayName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "ふつうの名前", input: "けんと", want: "けんと"},
+		{name: "前後の空白は落とす", input: "  けんと  ", want: "けんと"},
+		{name: "全角の空白も落とす", input: "　けんと　", want: "けんと"},
+		{name: "20文字ちょうどは通る", input: "あいうえおかきくけこさしすせそたちつてと", want: "あいうえおかきくけこさしすせそたちつてと"},
+		{name: "空", input: "", wantErr: true},
+		{name: "空白だけ", input: "   ", wantErr: true},
+		{name: "全角の空白だけ", input: "　　", wantErr: true},
+		{name: "21文字は弾く", input: "あいうえおかきくけこさしすせそたちつてとな", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, errMsg := validateDisplayName(tt.input)
+			if tt.wantErr {
+				if errMsg == "" {
+					t.Fatalf("expected error, got none (got %q)", got)
+				}
+				return
+			}
+			if errMsg != "" {
+				t.Fatalf("unexpected error: %s", errMsg)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
