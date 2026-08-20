@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -260,11 +261,64 @@ func sendNotification(ctx context.Context, n notification) error {
 		log.Printf("no SNS endpoint for user %s; skip. message=%q", n.UserID, n.Message)
 		return nil
 	}
-	_, err := snsClient.Publish(ctx, &sns.PublishInput{
+	payload, err := buildPushPayload(arn, n.Message)
+	if err != nil {
+		return err
+	}
+	_, err = snsClient.Publish(ctx, &sns.PublishInput{
 		TargetArn: aws.String(arn),
-		Message:   aws.String(n.Message),
+		Message:   aws.String(payload),
+		// これを付けないと Message が素の文字列のまま APNs へ渡り、表示されない。
+		MessageStructure: aws.String("json"),
 	})
 	return err
+}
+
+// buildPushPayload は SNS の「プラットフォームごとに中身を変える」形の Message を作る。
+//
+// APNs は aps を含む JSON でないと通知を表示しない。SNS に素の文字列を渡すと
+// そのまま APNs へ送られ、端末には何も出ない（送信自体は成功して見える）。
+//
+// 外側は {"default": ..., "APNS_SANDBOX": "<JSON文字列>"} の形。
+// APNs 向けの値が「JSON を文字列にしたもの」なのは SNS の仕様。
+// default は必須で、構造化を解さない経路への保険になる。
+func buildPushPayload(endpointArn, message string) (string, error) {
+	aps, err := json.Marshal(map[string]any{
+		"aps": map[string]any{
+			"alert": message,
+			"sound": "default",
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	outer, err := json.Marshal(map[string]string{
+		"default":                            message,
+		platformFromEndpointARN(endpointArn): string(aps),
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(outer), nil
+}
+
+// platformFromEndpointARN はエンドポイントARNからプラットフォーム名を取り出す。
+//
+//	arn:aws:sns:<region>:<account>:endpoint/APNS_SANDBOX/<app>/<uuid>
+//	                                        ^^^^^^^^^^^^
+//
+// 開発用（APNS_SANDBOX）か本番用（APNS）かでキー名が変わるので、
+// 設定を増やさずに ARN 自身から決める。読めなければ本番として扱う。
+func platformFromEndpointARN(arn string) string {
+	_, resource, found := strings.Cut(arn, ":endpoint/")
+	if !found {
+		return "APNS"
+	}
+	platform, _, found := strings.Cut(resource, "/")
+	if !found || platform == "" {
+		return "APNS"
+	}
+	return platform
 }
 
 // wroteInCycle は、そのユーザーがいま閉じるサイクル（cycleStartedAt 以降）に
