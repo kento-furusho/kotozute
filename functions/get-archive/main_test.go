@@ -143,3 +143,54 @@ func TestParseArchiveItem(t *testing.T) {
 		}
 	}
 }
+
+// from/to は SK の辞書順で比較されるので、書き方が違っても同じ範囲にならないと
+// 間のことづてが落ちる。UTC・秒までの形に揃うことを確かめる。
+func TestParseArchiveQuery_Range(t *testing.T) {
+	tests := []struct {
+		name     string
+		params   map[string]string
+		wantErr  bool
+		wantFrom string
+		wantTo   string
+	}{
+		{
+			name:     "UTCならそのまま",
+			params:   map[string]string{"from": "2026-08-16T09:25:10Z", "to": "2026-08-17T12:00:22Z"},
+			wantFrom: "2026-08-16T09:25:10Z", wantTo: "2026-08-17T12:00:22Z",
+		},
+		{
+			name:     "オフセット付きでもUTCに揃う",
+			params:   map[string]string{"from": "2026-08-16T18:25:10+09:00", "to": "2026-08-17T21:00:22+09:00"},
+			wantFrom: "2026-08-16T09:25:10Z", wantTo: "2026-08-17T12:00:22Z",
+		},
+		{name: "fromだけ", params: map[string]string{"from": "2026-08-16T09:25:10Z"}, wantErr: true},
+		{name: "toだけ", params: map[string]string{"to": "2026-08-17T12:00:22Z"}, wantErr: true},
+		{name: "同じ時刻", params: map[string]string{"from": "2026-08-16T09:25:10Z", "to": "2026-08-16T09:25:10Z"}, wantErr: true},
+		{name: "逆順", params: map[string]string{"from": "2026-08-17T12:00:22Z", "to": "2026-08-16T09:25:10Z"}, wantErr: true},
+		{name: "ゼロ埋めなし", params: map[string]string{"from": "2026-8-16T09:25:10Z", "to": "2026-08-17T12:00:22Z"}, wantErr: true},
+		{name: "時刻として読めない", params: map[string]string{"from": "きのう", "to": "きょう"}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q, errMsg := parseArchiveQuery(tt.params)
+			if tt.wantErr {
+				if errMsg == "" {
+					t.Fatalf("expected error, got none")
+				}
+				return
+			}
+			if errMsg != "" {
+				t.Fatalf("unexpected error: %s", errMsg)
+			}
+			if q.From != tt.wantFrom || q.To != tt.wantTo {
+				t.Errorf("from/to = %q/%q, want %q/%q", q.From, q.To, tt.wantFrom, tt.wantTo)
+			}
+			// 期間指定のときは年月を使わない。
+			if q.Year != 0 || q.Month != 0 {
+				t.Errorf("year/month should stay unset, got %d/%d", q.Year, q.Month)
+			}
+		})
+	}
+}

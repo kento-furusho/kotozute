@@ -105,7 +105,11 @@ GET /kotozute/archive?whose=me|partner&from=<ISO>&to=<ISO>          # 週ごと�
 → { "items": [...], "nextCursor": "<続き>" | null }
 ```
 - Dynamo の LastEvaluatedKey を Base64 等で不透明化して cursor に使う
-- 同じ月内のみ。`whose=partner` は opened=true のみ
+- `year`/`month` は同じ月内のみ。`from`/`to` は月をまたいでよい（週の範囲を渡す）
+- `from`/`to` は UTC に揃えてから使う。SK の比較は文字列の辞書順なので、書き方が違うと範囲がずれる
+- `whose=partner` は `previousCycleStartedAt` より前のみ（読むサイクルは相互ロックの対象なので出さない）
+- `items` が `limit` に達したら `nextCursor` が付く。**続きは必ずたどること**。
+  とくに `whose=partner` は絞り込みが `limit` の後に効くので、`items` が少なくても続きが残っていることがある
 
 ---
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -184,6 +185,20 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}, nil
 }
 
+// normalizeTimestamp は from/to を、SK に入っているのと同じ書き方（UTC・秒まで）に揃える。
+//
+// SK の範囲比較は文字列の辞書順なので、同じ時刻でも書き方が違うと結果が変わる。
+// 例えば 2026-08-17T21:00:22+09:00 は 2026-08-17T12:00:22Z と同じ時刻だが、
+// 文字列としては後ろに並ぶので、間のことづてが範囲から落ちる。
+// いったん時刻として読んでから UTC で書き直すことで、どの書き方で来ても同じ範囲になる。
+func normalizeTimestamp(value string) (string, bool) {
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return "", false
+	}
+	return t.UTC().Format(time.RFC3339), true
+}
+
 // parseArchiveQuery はクエリパラメータを検証しつつ archiveQuery に変換する純粋関数。
 // 不正があれば errMsg（400用）を返す。
 func parseArchiveQuery(params map[string]string) (archiveQuery, string) {
@@ -196,15 +211,23 @@ func parseArchiveQuery(params map[string]string) (archiveQuery, string) {
 		q.Whose = w
 	}
 
-	q.From = params["from"]
-	q.To = params["to"]
-	if q.From != "" || q.To != "" {
-		if q.From == "" || q.To == "" {
+	if params["from"] != "" || params["to"] != "" {
+		if params["from"] == "" || params["to"] == "" {
 			return archiveQuery{}, "from and to must be given together"
 		}
-		if q.From >= q.To {
+		from, ok := normalizeTimestamp(params["from"])
+		if !ok {
+			return archiveQuery{}, "from must be an RFC3339 timestamp"
+		}
+		to, ok := normalizeTimestamp(params["to"])
+		if !ok {
+			return archiveQuery{}, "to must be an RFC3339 timestamp"
+		}
+		if from >= to {
 			return archiveQuery{}, "from must be before to"
 		}
+		q.From = from
+		q.To = to
 	} else {
 		year, err := strconv.Atoi(params["year"])
 		if err != nil || year < 2000 || year > 2100 {
