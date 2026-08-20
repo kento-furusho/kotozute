@@ -5,6 +5,17 @@ Description: >
 
   Sample SAM Template for kotozute
 
+Parameters:
+  # SNS のプラットフォームアプリケーション（APNs）の ARN。
+  # APNs の認証キーを Apple Developer で発行し、SNS に登録して初めて作れる。
+  # それまでは空のままでよく、そのとき PATCH /me は端末を登録せず
+  # apnsToken の保存だけを行う（通知は飛ばない）。
+  # 設定するときは: sam deploy --parameter-overrides SnsPlatformApplicationArn=arn:aws:sns:...
+  SnsPlatformApplicationArn:
+    Type: String
+    Default: ""
+    Description: "SNS platform application ARN for APNs. Empty disables device registration."
+
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
@@ -253,6 +264,16 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: kotozute
+        # 端末のトークンを SNS に登録して、通知の宛先（エンドポイントARN）を作る権限。
+        # 既に同じトークンのエンドポイントがある場合は属性を入れ直すので Set も要る。
+        - Statement:
+            - Sid: AllowSNSEndpointRegistration
+              Effect: Allow
+              Action:
+                - sns:CreatePlatformEndpoint
+                - sns:SetEndpointAttributes
+                - sns:GetEndpointAttributes
+              Resource: "*"
       Events:
         PatchMe:
           Type: Api
@@ -264,6 +285,7 @@ Resources:
       Environment:
         Variables:
           DYNAMODB_ENDPOINT: ""
+          SNS_PLATFORM_APPLICATION_ARN: !Ref SnsPlatformApplicationArn
 
   PatchPairFunction:
     Type: AWS::Serverless::Function

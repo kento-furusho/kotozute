@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	snstypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
 )
 
 // strPtr は文字列のポインタを作るテスト用ヘルパー（*string のリテラルが書けないため）。
@@ -27,6 +30,7 @@ func TestBuildUpdateExpression(t *testing.T) {
 		name         string
 		req          patchMeRequest
 		wantOK       bool
+		arn          string
 		wantExpr     string
 		wantValueLen int
 	}{
@@ -56,11 +60,27 @@ func TestBuildUpdateExpression(t *testing.T) {
 			req:    patchMeRequest{},
 			wantOK: false,
 		},
+		{
+			name:         "端末の登録に成功したらエンドポイントARNも保存する",
+			req:          patchMeRequest{ApnsToken: strPtr("tok123")},
+			arn:          "arn:aws:sns:ap-northeast-1:123:endpoint/APNS/kotozute/abc",
+			wantOK:       true,
+			wantExpr:     "SET apnsToken = :apnsToken, snsEndpointArn = :snsEndpointArn",
+			wantValueLen: 2,
+		},
+		{
+			name:         "登録に失敗してもトークンは保存する",
+			req:          patchMeRequest{ApnsToken: strPtr("tok123")},
+			arn:          "",
+			wantOK:       true,
+			wantExpr:     "SET apnsToken = :apnsToken",
+			wantValueLen: 1,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			expr, values, ok := buildUpdateExpression(tt.req)
+			expr, values, ok := buildUpdateExpression(tt.req, tt.arn)
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
 			}
@@ -107,5 +127,49 @@ func TestHandler_NothingToUpdate(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, response.StatusCode)
+	}
+}
+
+// 同じトークンで属性違いのエンドポイントが既にあると、SNS は作成せずエラーを返す。
+// そのエラー文から既存の ARN を拾えないと、端末が永遠に登録できない。
+func TestExistingEndpointARN(t *testing.T) {
+	const arn = "arn:aws:sns:ap-northeast-1:123456789012:endpoint/APNS/kotozute/9b7c1d2e-0000-1111-2222-333344445555"
+
+	tests := []struct {
+		name   string
+		err    error
+		want   string
+		wantOK bool
+	}{
+		{
+			name: "既存エンドポイントのエラーからARNを拾う",
+			err: &snstypes.InvalidParameterException{
+				Message: aws.String("Invalid parameter: Token Reason: Endpoint " + arn +
+					" already exists with the same Token, but different attributes."),
+			},
+			want: arn, wantOK: true,
+		},
+		{
+			name:   "別のInvalidParameter（ARNが無い）は拾わない",
+			err:    &snstypes.InvalidParameterException{Message: aws.String("Invalid parameter: Token")},
+			wantOK: false,
+		},
+		{
+			name:   "そもそも別のエラー",
+			err:    errors.New("network unreachable"),
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := existingEndpointARN(tt.err)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if ok && got != tt.want {
+				t.Errorf("arn = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
