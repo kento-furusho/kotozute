@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -67,6 +68,26 @@ func init() {
 type patchMeRequest struct {
 	DisplayName *string `json:"displayName"`
 	ApnsToken   *string `json:"apnsToken"`
+}
+
+// 表示名の上限。相手の画面では「◯◯からのことづて」の◯◯に入るので、
+// 長すぎると見出しが折り返して読みにくくなる。
+const maxDisplayNameRunes = 20
+
+// validateDisplayName は表示名を検証し、前後の空白を落としたものを返す。
+// 不正なら errMsg（400用）を返す。
+//
+// 空を通すと、相手の画面の「◯◯からのことづて」やロック画面の文言が
+// 崩れる。長さは文字数で数える（日本語はバイト数だとすぐ上限に当たる）。
+func validateDisplayName(name string) (string, string) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", "displayName must not be empty"
+	}
+	if utf8.RuneCountInString(trimmed) > maxDisplayNameRunes {
+		return "", "displayName is too long"
+	}
+	return trimmed, ""
 }
 
 // buildUpdateExpression は、nil でないフィールドだけを SET する UpdateExpression と
@@ -162,6 +183,15 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	var req patchMeRequest
 	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
 		return errorResponse(http.StatusBadRequest, "invalid request body"), nil
+	}
+
+	// 表示名が送られてきたときだけ検証する。キーが無ければ更新対象ではない。
+	if req.DisplayName != nil {
+		name, errMsg := validateDisplayName(*req.DisplayName)
+		if errMsg != "" {
+			return errorResponse(http.StatusBadRequest, errMsg), nil
+		}
+		req.DisplayName = &name
 	}
 
 	// 端末のトークンが来たら SNS に登録して、通知の宛先（エンドポイントARN）を得る。
