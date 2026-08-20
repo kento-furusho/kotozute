@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -59,6 +61,26 @@ type userResponse struct {
 	Email       string `json:"email,omitempty"`
 }
 
+// 表示名の上限。相手の画面では「◯◯からのことづて」の◯◯に入るので、
+// 長すぎると見出しが折り返して読みにくくなる。
+const maxDisplayNameRunes = 20
+
+// validateDisplayName は表示名を検証し、前後の空白を落としたものを返す。
+// 不正なら errMsg（400用）を返す。
+//
+// 空を通すと、相手の画面の「◯◯からのことづて」やロック画面の文言が
+// 崩れる。長さは文字数で数える（日本語はバイト数だとすぐ上限に当たる）。
+func validateDisplayName(name string) (string, string) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", "displayName must not be empty"
+	}
+	if utf8.RuneCountInString(trimmed) > maxDisplayNameRunes {
+		return "", "displayName is too long"
+	}
+	return trimmed, ""
+}
+
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	// Cognitoでサインアップ・ログイン済みの本人だけが、自分のプロフィールを登録できる。
 	userID, ok := userIDFromRequest(request)
@@ -70,9 +92,11 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
 		return errorResponse(http.StatusBadRequest, "invalid request body"), nil
 	}
-	if req.DisplayName == "" {
-		return errorResponse(http.StatusBadRequest, "displayName is required"), nil
+	name, errMsg := validateDisplayName(req.DisplayName)
+	if errMsg != "" {
+		return errorResponse(http.StatusBadRequest, errMsg), nil
 	}
+	req.DisplayName = name
 
 	item := map[string]types.AttributeValue{
 		"PK":          &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
