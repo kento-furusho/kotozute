@@ -44,7 +44,7 @@ Resources:
       GlobalSecondaryIndexes:
         # GSI①（曜日）: 週一バッチが「今日オープンすべきペア」を引くための索引。
         # openDayOfWeek を持つのは PAIR の META だけなので、索引には自然とペアだけが載る（スパース索引）。
-        # Projection=ALL にして、バッチが member1/member2/lastOpenedAt を追加読み込みなしで得られるようにする。
+        # Projection=ALL にして、バッチが member1/member2/cycleStartedAt/cycleStarts を追加読み込みなしで得られるようにする。
         - IndexName: GSI1
           KeySchema:
             - AttributeName: openDayOfWeek

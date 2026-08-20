@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -54,7 +55,12 @@ func init() {
 	})
 }
 
+// 期間指定（from/to）があればそちらを使い、無ければ年月で引く。
+// 週ごとにたどる画面は from/to を、月ごとの画面は year/month を使う。
 type archiveQuery struct {
+	From string
+	To   string
+
 	Whose  string // "me" | "partner"
 	Year   int
 	Month  int
@@ -105,7 +111,8 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	// 誰のことづてを見るか。partner の場合は PAIR META から相手を解決する。
 	targetUser := userID
 	partnerOnly := false
-	cycleStartedAt := ""
+	// 相手の分を見せてよい上限。読むサイクルより前＝すでに読み終えた分だけ。
+	openedBefore := ""
 	if q.Whose == "partner" {
 		members, err := getPairMembers(ctx, pairID)
 		if err != nil {
@@ -114,35 +121,41 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		targetUser = partnerUserID(members, userID)
 		partnerOnly = true
 
-		// オープン済みかどうかの判定に、書くサイクルの開始時刻が要る。
-		cycleStartedAt, err = getCycleStartedAt(ctx, pairID)
+		openedBefore, err = getPreviousCycleStartedAt(ctx, pairID)
 		if err != nil {
 			return errorResponse(http.StatusInternalServerError, "failed to fetch pair"), nil
 		}
 	}
 
-	// ことづては書いた人のパーティションにある。SK は KOTOZUTE#<ISO日時>#<id> で、
-	// ISO日時は "2026-08-..." なので、年月プレフィックスで begins_with すればその月に絞れる。
-	skPrefix := fmt.Sprintf("KOTOZUTE#%04d-%02d", q.Year, q.Month)
-
+	// ことづては書いた人のパーティションにある。SK は KOTOZUTE#<ISO日時>#<id>。
 	input := &dynamodb.QueryInput{
-		TableName:              aws.String(tableName),
-		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),
+		TableName: aws.String(tableName),
+		Limit:     aws.Int32(int32(q.Limit)),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk":     &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", targetUser)},
-			":prefix": &types.AttributeValueMemberS{Value: skPrefix},
+			":pk": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", targetUser)},
 		},
-		Limit: aws.Int32(int32(q.Limit)),
+	}
+	if q.From != "" {
+		// 週の範囲。to は含めない（次の週の始まりなので）。
+		input.KeyConditionExpression = aws.String("PK = :pk AND SK BETWEEN :from AND :to")
+		input.ExpressionAttributeValues[":from"] = &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s", q.From)}
+		input.ExpressionAttributeValues[":to"] = &types.AttributeValueMemberS{Value: fmt.Sprintf("KOTOZUTE#%s", q.To)}
+	} else {
+		// ISO日時は "2026-08-..." なので、年月プレフィックスで begins_with すればその月に絞れる。
+		input.KeyConditionExpression = aws.String("PK = :pk AND begins_with(SK, :prefix)")
+		input.ExpressionAttributeValues[":prefix"] = &types.AttributeValueMemberS{
+			Value: fmt.Sprintf("KOTOZUTE#%04d-%02d", q.Year, q.Month),
+		}
 	}
 	if startKey != nil {
 		input.ExclusiveStartKey = startKey
 	}
-	// 相手の過去分はオープン済みのみ見せる（過去ロックの緩和）。
-	// オープン済み ＝ 書くサイクルの開始より前に書かれたもの。
-	// まだ一度もオープンしていない場合（cycleStartedAt が空）は、見せられるものが無い。
+	// 相手の過去分は「読み終えたサイクル」だけ見せる（過去ロックの緩和）。
+	// いま解禁されているサイクルは相互ロックの対象なので、ここには出さない。
+	// 出すと、書いていない人がアーカイブ経由でロックを迂回できてしまう。
 	if partnerOnly {
-		input.FilterExpression = aws.String("createdAt < :cycleStartedAt")
-		input.ExpressionAttributeValues[":cycleStartedAt"] = &types.AttributeValueMemberS{Value: cycleStartedAt}
+		input.FilterExpression = aws.String("createdAt < :openedBefore")
+		input.ExpressionAttributeValues[":openedBefore"] = &types.AttributeValueMemberS{Value: openedBefore}
 	}
 
 	out, err := dynamoClient.Query(ctx, input)
@@ -172,6 +185,20 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}, nil
 }
 
+// normalizeTimestamp は from/to を、SK に入っているのと同じ書き方（UTC・秒まで）に揃える。
+//
+// SK の範囲比較は文字列の辞書順なので、同じ時刻でも書き方が違うと結果が変わる。
+// 例えば 2026-08-17T21:00:22+09:00 は 2026-08-17T12:00:22Z と同じ時刻だが、
+// 文字列としては後ろに並ぶので、間のことづてが範囲から落ちる。
+// いったん時刻として読んでから UTC で書き直すことで、どの書き方で来ても同じ範囲になる。
+func normalizeTimestamp(value string) (string, bool) {
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return "", false
+	}
+	return t.UTC().Format(time.RFC3339), true
+}
+
 // parseArchiveQuery はクエリパラメータを検証しつつ archiveQuery に変換する純粋関数。
 // 不正があれば errMsg（400用）を返す。
 func parseArchiveQuery(params map[string]string) (archiveQuery, string) {
@@ -184,17 +211,36 @@ func parseArchiveQuery(params map[string]string) (archiveQuery, string) {
 		q.Whose = w
 	}
 
-	year, err := strconv.Atoi(params["year"])
-	if err != nil || year < 2000 || year > 2100 {
-		return archiveQuery{}, "year is required and must be valid"
-	}
-	q.Year = year
+	if params["from"] != "" || params["to"] != "" {
+		if params["from"] == "" || params["to"] == "" {
+			return archiveQuery{}, "from and to must be given together"
+		}
+		from, ok := normalizeTimestamp(params["from"])
+		if !ok {
+			return archiveQuery{}, "from must be an RFC3339 timestamp"
+		}
+		to, ok := normalizeTimestamp(params["to"])
+		if !ok {
+			return archiveQuery{}, "to must be an RFC3339 timestamp"
+		}
+		if from >= to {
+			return archiveQuery{}, "from must be before to"
+		}
+		q.From = from
+		q.To = to
+	} else {
+		year, err := strconv.Atoi(params["year"])
+		if err != nil || year < 2000 || year > 2100 {
+			return archiveQuery{}, "year is required and must be valid"
+		}
+		q.Year = year
 
-	month, err := strconv.Atoi(params["month"])
-	if err != nil || month < 1 || month > 12 {
-		return archiveQuery{}, "month is required and must be between 1 and 12"
+		month, err := strconv.Atoi(params["month"])
+		if err != nil || month < 1 || month > 12 {
+			return archiveQuery{}, "month is required and must be between 1 and 12"
+		}
+		q.Month = month
 	}
-	q.Month = month
 
 	if l, ok := params["limit"]; ok && l != "" {
 		limit, err := strconv.Atoi(l)
@@ -281,9 +327,13 @@ func partnerUserID(members pairMembers, myUserID string) string {
 	return members.Member1
 }
 
-// getCycleStartedAt は PAIR META から「書くサイクルの開始時刻」を読む。
-// これより前に書かれたことづてがオープン済み。
-func getCycleStartedAt(ctx context.Context, pairID string) (string, error) {
+// getPreviousCycleStartedAt は PAIR META から「読むサイクルの開始時刻」を読む。
+//
+// アーカイブで相手の分を見せてよいのは、これより前に書かれたもの＝すでに読み終えた
+// サイクルまで。読むサイクル（[previousCycleStartedAt, cycleStartedAt)）は、いま
+// 相互ロックの対象になっているので、ここに含めてはいけない。
+// cycleStartedAt で絞ると読むサイクルまで入り、ロックを迂回して読めてしまう。
+func getPreviousCycleStartedAt(ctx context.Context, pairID string) (string, error) {
 	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
 		Key: map[string]types.AttributeValue{
@@ -294,7 +344,7 @@ func getCycleStartedAt(ctx context.Context, pairID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if v, ok := out.Item["cycleStartedAt"].(*types.AttributeValueMemberS); ok {
+	if v, ok := out.Item["previousCycleStartedAt"].(*types.AttributeValueMemberS); ok {
 		return v.Value, nil
 	}
 	return "", nil

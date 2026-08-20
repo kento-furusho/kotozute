@@ -40,7 +40,7 @@
 |---|---|---|
 | USER#<id> | META | email, displayName, apnsToken, pairId |
 | USER#<id> | KOTOZUTE#<ISO日時>#<ことづてid> | body, createdAt |
-| PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, timezone, status, cycleStartedAt, previousCycleStartedAt |
+| PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, timezone, status, cycleStartedAt, previousCycleStartedAt, cycleStarts |
 | INVITE#<token> | META | inviterUserId, status, ttl |
 
 GSI（2個）:
@@ -57,7 +57,7 @@ GSI（2個）:
 ### 主なアクセスパターン
 - 書くサイクルの自分のことづて: `PK=USER#<自分>, SK BETWEEN KOTOZUTE#<cycleStartedAt> AND KOTOZUTE#￿`
 - 読むサイクルの相手のことづて: `PK=USER#<相手>, SK BETWEEN KOTOZUTE#<previousCycleStartedAt> AND KOTOZUTE#<cycleStartedAt>`
-- アーカイブ（月ごと）: `PK=USER#<誰か>, SK begins_with KOTOZUTE#<年月>`（相手は `cycleStartedAt` より前のみ＝オープン済み）
+- アーカイブ（月ごと）: `PK=USER#<誰か>, SK begins_with KOTOZUTE#<年月>`（相手は `previousCycleStartedAt` より前のみ）
 - ログイン: GSI② `PK=EMAIL#<addr>`
 - バッチ対象ペア検索: GSI① `PK=openDayOfWeek=5`
 - 自分の情報/ペア: `GetItem USER#<id>/META` → pairId 取得
@@ -101,10 +101,15 @@ GSI（2個）:
 ### GET /kotozute/archive
 ```
 GET /kotozute/archive?whose=me|partner&year=2026&month=6&cursor=<不透明トークン>&limit=10
+GET /kotozute/archive?whose=me|partner&from=<ISO>&to=<ISO>          # 週ごとに引くとき（to は含まない）
 → { "items": [...], "nextCursor": "<続き>" | null }
 ```
 - Dynamo の LastEvaluatedKey を Base64 等で不透明化して cursor に使う
-- 同じ月内のみ。`whose=partner` は opened=true のみ
+- `year`/`month` は同じ月内のみ。`from`/`to` は月をまたいでよい（週の範囲を渡す）
+- `from`/`to` は UTC に揃えてから使う。SK の比較は文字列の辞書順なので、書き方が違うと範囲がずれる
+- `whose=partner` は `previousCycleStartedAt` より前のみ（読むサイクルは相互ロックの対象なので出さない）
+- `items` が `limit` に達したら `nextCursor` が付く。**続きは必ずたどること**。
+  とくに `whose=partner` は絞り込みが `limit` の後に効くので、`items` が少なくても続きが残っていることがある
 
 ---
 
@@ -145,6 +150,10 @@ previousCycleStartedAt        cycleStartedAt              現在
   読むサイクルは空（＝オープン前）になり、**ペア成立前に書いた分も最初の書くサイクルに入る**。
   成立日時で初期化すると、オンボーディングで書いた「最初の1枚」が最初のサイクルから外れてしまう。
 
+**区切りの履歴（`cycleStarts`）**：オープンのたびに開始時刻を積んでいく（古い順）。
+隣り合う2つが1週間の範囲になる。直近2つだけでは過去の週を復元できず、
+壁を週ごとにたどれないため。カレンダーの週で代用すると、オープン曜日を変えたときにずれる。
+
 **区切りを2つにする理由**：1つだと、オープンした瞬間に「読むもの」と「書くもの」の区別がつかない。
 オープンでその1つの区切りを前に進めると、いま解禁したことづてが同時に範囲外へ出てしまい、
 ④「相手のことづてを見せる」に永久に到達できなくなる（実際にそうなっていた）。
@@ -173,8 +182,12 @@ EventBridge(曜日×時刻) → Lambda
 - 両者ゼロの週は通知しない。
 
 ### 過去ロックの緩和（現在は厳格・過去は寛容）
-- 今のサイクル：厳格（相互ロック）
-- アーカイブ（過去分）：オープン済みなら見られる（自分がその週書いたかは問わない）。実装は `GET /kotozute/archive?whose=partner` を `cycleStartedAt` より前で絞るだけ。
+- **読むサイクル**（いま解禁されている分）：厳格（相互ロック）。`GET /kotozute/this-week` だけが返す。
+- **それより前**（読み終えたサイクル）：寛容。オープン済みなら見られる（自分がその週書いたかは問わない）。
+
+実装は `GET /kotozute/archive?whose=partner` を **`previousCycleStartedAt` より前**で絞る。
+`cycleStartedAt` で絞ると読むサイクルまで入り、書いていない人がアーカイブ経由で
+相互ロックを迂回して読めてしまう（一度そうなっていた）。
 
 ### 状態遷移・編集/削除
 - ことづて：書く →（オープン前：下書き、本人のみ、編集可）→ 週一オープン → 確定（変更不可）
@@ -230,4 +243,13 @@ sam local invoke --env-vars env.json
 sam local start-api --env-vars env.json   # http://127.0.0.1:3000 でAPIを立てる
 ```
 
-**未対応**：GSI①②はまだ `scripts/create-table.sh` に定義していない。GSI を使う機能（ログイン、バッチ）実装時に、このスクリプトへ GSI 定義を追加すること。
+**GSI について**：GSI①（曜日）は `scripts/create-table.sh` と `template.yaml` の両方に定義済み。
+GSI②（メール）は、Cognito 以外のログイン経路を作るときに追加する（今はコードから参照していない）。
+
+既にテーブルがある環境に GSI を後から足すときは、作り直さず `update-table` を使う:
+```bash
+AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local AWS_REGION=ap-northeast-1 \
+aws dynamodb update-table --table-name kotozute --endpoint-url http://localhost:8000 \
+  --attribute-definitions AttributeName=openDayOfWeek,AttributeType=N \
+  --global-secondary-index-updates '[{"Create":{"IndexName":"GSI1","KeySchema":[{"AttributeName":"openDayOfWeek","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}}]'
+```

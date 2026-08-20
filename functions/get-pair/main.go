@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,9 @@ type pairResponse struct {
 	Timezone      string      `json:"timezone"`
 	Status        string      `json:"status"`
 	NextOpenAt    string      `json:"nextOpenAt"`
+	// サイクルの区切り（古い順）。週ごとに遡って読むために返す。
+	// 隣り合う2つが1つの週の範囲になる。末尾は「いま書いているサイクル」の開始。
+	CycleStarts []string `json:"cycleStarts"`
 }
 
 // pairMeta はPAIR METAから読み出す、レスポンス生成に必要な値。
@@ -73,6 +77,7 @@ type pairMeta struct {
 	OpenTime      string
 	Timezone      string
 	Status        string
+	CycleStarts   []string
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -120,6 +125,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		Timezone:      meta.Timezone,
 		Status:        meta.Status,
 		NextOpenAt:    nextOpenAt,
+		CycleStarts:   meta.CycleStarts,
 	}
 
 	resBody, err := json.Marshal(res)
@@ -132,6 +138,22 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		Body:       string(resBody),
 	}, nil
+}
+
+// sortedUnique は重複を取り除いて古い順に並べる。
+// ISO8601 の文字列は辞書順が時刻順と一致するので、文字列のまま並べてよい。
+func sortedUnique(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // getUserPairID は USER#<userID>/META から pairId を読む。ペア未成立なら空文字を返す。
@@ -192,6 +214,22 @@ func buildPairMetaFromItem(item map[string]types.AttributeValue) *pairMeta {
 	if v, ok := item["openTime"].(*types.AttributeValueMemberS); ok {
 		meta.OpenTime = v.Value
 	}
+	if v, ok := item["cycleStarts"].(*types.AttributeValueMemberL); ok {
+		for _, entry := range v.Value {
+			if s, ok := entry.(*types.AttributeValueMemberS); ok {
+				meta.CycleStarts = append(meta.CycleStarts, s.Value)
+			}
+		}
+	}
+	// 直近2つの区切りは必ず含める。
+	// 履歴を持たない古いペアや、履歴の記録を始める前のオープン分を取りこぼさないため
+	// （list_append は属性が無いところから始まるので、それ以前の区切りが履歴に入らない）。
+	for _, key := range []string{"previousCycleStartedAt", "cycleStartedAt"} {
+		if v, ok := item[key].(*types.AttributeValueMemberS); ok {
+			meta.CycleStarts = append(meta.CycleStarts, v.Value)
+		}
+	}
+	meta.CycleStarts = sortedUnique(meta.CycleStarts)
 	if v, ok := item["timezone"].(*types.AttributeValueMemberS); ok {
 		meta.Timezone = v.Value
 	}
