@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -15,11 +17,20 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	snstypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
 )
 
 const tableName = "kotozute"
 
 var dynamoClient *dynamodb.Client
+var snsClient *sns.Client
+
+// SNS のプラットフォームアプリケーション（APNs）の ARN。
+// APNs の認証キーを登録して初めて作れるので、それまでは空のままにしておく。
+// 空のときは端末の登録をせず、apnsToken の保存だけで済ませる（通知は飛ばない）。
+// あとで ARN を設定すれば、アプリが次にトークンを送ってきたときに登録される。
+var platformApplicationArn string
 
 // userIDFromRequest はAPI Gatewayが検証済みのCognitoトークンから、ユーザーの一意なID（sub）を取り出す。
 // トークンが無い/壊れている場合は ok=false を返し、呼び出し側が401にする。
@@ -47,6 +58,8 @@ func init() {
 			o.BaseEndpoint = aws.String(endpoint)
 		}
 	})
+	snsClient = sns.NewFromConfig(cfg)
+	platformApplicationArn = os.Getenv("SNS_PLATFORM_APPLICATION_ARN")
 }
 
 // ポインタ型にすることで「JSONにキーが無い（nil）」と「空文字を送ってきた」を区別する。
@@ -58,8 +71,11 @@ type patchMeRequest struct {
 
 // buildUpdateExpression は、nil でないフィールドだけを SET する UpdateExpression と
 // その値マップを組み立てる純粋関数。更新対象が1つも無ければ ok=false を返す。
-func buildUpdateExpression(req patchMeRequest) (string, map[string]types.AttributeValue, bool) {
-	setClauses := make([]string, 0, 2)
+//
+// snsEndpointArn は端末の登録に成功したときだけ渡ってくる。空なら触らない
+// （登録に失敗しても apnsToken の保存は済ませたいので、更新対象から外すだけにする）。
+func buildUpdateExpression(req patchMeRequest, snsEndpointArn string) (string, map[string]types.AttributeValue, bool) {
+	setClauses := make([]string, 0, 3)
 	values := map[string]types.AttributeValue{}
 	if req.DisplayName != nil {
 		setClauses = append(setClauses, "displayName = :displayName")
@@ -69,10 +85,72 @@ func buildUpdateExpression(req patchMeRequest) (string, map[string]types.Attribu
 		setClauses = append(setClauses, "apnsToken = :apnsToken")
 		values[":apnsToken"] = &types.AttributeValueMemberS{Value: *req.ApnsToken}
 	}
+	if snsEndpointArn != "" {
+		setClauses = append(setClauses, "snsEndpointArn = :snsEndpointArn")
+		values[":snsEndpointArn"] = &types.AttributeValueMemberS{Value: snsEndpointArn}
+	}
 	if len(setClauses) == 0 {
 		return "", nil, false
 	}
 	return "SET " + strings.Join(setClauses, ", "), values, true
+}
+
+// registerPushEndpoint は端末のトークンを SNS に登録し、そのエンドポイントARNを返す。
+// 週一バッチはこの ARN 宛に Publish する。
+//
+// 同じトークンで既にエンドポイントがあると SNS は新規作成せずに既存のものを返すが、
+// 属性（CustomUserData など）が違う場合だけはエラーになる。そのエラー文に既存の ARN が
+// 入っているので、拾って使い回す。あわせてトークンを入れ直し、有効化もしておく
+// （APNs に弾かれた端末は Enabled=false のまま残るため、入れ直さないと二度と届かない）。
+func registerPushEndpoint(ctx context.Context, userID, token string) (string, error) {
+	out, err := snsClient.CreatePlatformEndpoint(ctx, &sns.CreatePlatformEndpointInput{
+		PlatformApplicationArn: aws.String(platformApplicationArn),
+		Token:                  aws.String(token),
+		// 誰の端末か分かるようにしておく。SNS 側から辿るときに要る。
+		CustomUserData: aws.String(userID),
+	})
+	if err == nil {
+		return aws.ToString(out.EndpointArn), nil
+	}
+
+	arn, ok := existingEndpointARN(err)
+	if !ok {
+		return "", err
+	}
+	_, err = snsClient.SetEndpointAttributes(ctx, &sns.SetEndpointAttributesInput{
+		EndpointArn: aws.String(arn),
+		Attributes: map[string]string{
+			"Token":   token,
+			"Enabled": "true",
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return arn, nil
+}
+
+// endpointARNPattern は SNS のエラー文に混じるエンドポイントARNを拾う。
+// 文面は
+//
+//	Invalid parameter: Token Reason: Endpoint arn:aws:sns:ap-northeast-1:123:endpoint/APNS/kotozute/xxxx
+//	already exists with the same Token, but different attributes.
+//
+// のような形をしている。
+var endpointARNPattern = regexp.MustCompile(`arn:aws[a-zA-Z0-9-]*:sns:[a-zA-Z0-9:/_-]+`)
+
+// existingEndpointARN は「同じトークンのエンドポイントが既にある」エラーから ARN を取り出す。
+// それ以外のエラーでは ok=false を返し、呼び出し側がそのまま失敗として扱えるようにする。
+func existingEndpointARN(err error) (string, bool) {
+	var invalid *snstypes.InvalidParameterException
+	if !errors.As(err, &invalid) {
+		return "", false
+	}
+	arn := endpointARNPattern.FindString(aws.ToString(invalid.Message))
+	if arn == "" {
+		return "", false
+	}
+	return arn, true
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -86,8 +164,21 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return errorResponse(http.StatusBadRequest, "invalid request body"), nil
 	}
 
+	// 端末のトークンが来たら SNS に登録して、通知の宛先（エンドポイントARN）を得る。
+	// 失敗しても 400/500 にはしない。apnsToken は保存されるし、アプリは起動のたびに
+	// トークンを送ってくるので、次の機会に登録し直せる。
+	snsEndpointArn := ""
+	if req.ApnsToken != nil && *req.ApnsToken != "" && platformApplicationArn != "" {
+		arn, err := registerPushEndpoint(ctx, userID, *req.ApnsToken)
+		if err != nil {
+			log.Printf("failed to register push endpoint for user %s: %v", userID, err)
+		} else {
+			snsEndpointArn = arn
+		}
+	}
+
 	// 送られてきた項目だけを SET する UpdateExpression を組み立てる。
-	updateExpression, values, ok := buildUpdateExpression(req)
+	updateExpression, values, ok := buildUpdateExpression(req, snsEndpointArn)
 	if !ok {
 		return errorResponse(http.StatusBadRequest, "nothing to update"), nil
 	}

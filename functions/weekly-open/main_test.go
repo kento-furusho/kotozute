@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -137,5 +138,78 @@ func TestBuildPairMeta(t *testing.T) {
 	}
 	if p.CycleStartedAt != "2026-07-31T20:00:00Z" {
 		t.Errorf("CycleStartedAt = %q, want %q", p.CycleStartedAt, "2026-07-31T20:00:00Z")
+	}
+}
+
+// APNs は aps を含む JSON でないと通知を表示しない。
+// 素の文字列を渡すと送信は成功して見えるのに端末には何も出ないので、
+// 形が崩れていないかをここで押さえる。
+func TestBuildPushPayload(t *testing.T) {
+	const message = "今週のことづて、オープンしました"
+	const arn = "arn:aws:sns:ap-northeast-1:123456789012:endpoint/APNS_SANDBOX/kotozute/abc-def"
+
+	raw, err := buildPushPayload(arn, message)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var outer map[string]string
+	if err := json.Unmarshal([]byte(raw), &outer); err != nil {
+		t.Fatalf("outer is not JSON: %v", err)
+	}
+	if outer["default"] != message {
+		t.Errorf("default = %q, want %q", outer["default"], message)
+	}
+
+	// サンドボックスのエンドポイントなら、キーは APNS ではなく APNS_SANDBOX。
+	apnsJSON, ok := outer["APNS_SANDBOX"]
+	if !ok {
+		t.Fatalf("APNS_SANDBOX key is missing: %v", outer)
+	}
+
+	var inner struct {
+		APS struct {
+			Alert string `json:"alert"`
+			Sound string `json:"sound"`
+		} `json:"aps"`
+	}
+	if err := json.Unmarshal([]byte(apnsJSON), &inner); err != nil {
+		t.Fatalf("inner is not JSON: %v", err)
+	}
+	if inner.APS.Alert != message {
+		t.Errorf("aps.alert = %q, want %q", inner.APS.Alert, message)
+	}
+	if inner.APS.Sound == "" {
+		t.Error("aps.sound is empty")
+	}
+}
+
+func TestPlatformFromEndpointARN(t *testing.T) {
+	tests := []struct {
+		name string
+		arn  string
+		want string
+	}{
+		{
+			name: "サンドボックス",
+			arn:  "arn:aws:sns:ap-northeast-1:123:endpoint/APNS_SANDBOX/kotozute/abc",
+			want: "APNS_SANDBOX",
+		},
+		{
+			name: "本番",
+			arn:  "arn:aws:sns:ap-northeast-1:123:endpoint/APNS/kotozute/abc",
+			want: "APNS",
+		},
+		// 読めないときに空のキーを作ると SNS に弾かれる。本番として扱う。
+		{name: "エンドポイントARNではない", arn: "arn:aws:sns:ap-northeast-1:123:topic", want: "APNS"},
+		{name: "空", arn: "", want: "APNS"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := platformFromEndpointARN(tt.arn); got != tt.want {
+				t.Errorf("platform = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
