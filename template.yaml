@@ -294,6 +294,50 @@ Resources:
         Variables:
           DYNAMODB_ENDPOINT: ""
 
+  # DELETE /me（アカウント削除）。App Store の要件。
+  # 消すのは自分のデータだけ。相手が書いたことづては相手のものなので触らない。
+  DeleteMeFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/delete-me/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      # ことづてが多いと消すのに時間がかかる。API 関数の既定（5秒）では足りない。
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+        # Cognito のユーザーを消す。アカウントが残ると「消したのにログインできる」状態になる。
+        - Statement:
+            - Sid: AllowDeleteCognitoUser
+              Effect: Allow
+              Action:
+                - cognito-idp:AdminDeleteUser
+              Resource: !GetAtt KotozuteUserPool.Arn
+        # 端末の登録も落とす。残すと消えたユーザー宛に配信を試み続ける。
+        - Statement:
+            - Sid: AllowDeleteSNSEndpoint
+              Effect: Allow
+              Action:
+                - sns:DeleteEndpoint
+              Resource: "*"
+      Events:
+        DeleteMe:
+          Type: Api
+          Properties:
+            Path: /me
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+          USER_POOL_ID: !Ref KotozuteUserPool
+
   PatchMeFunction:
     Type: AWS::Serverless::Function
     Metadata:
