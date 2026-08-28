@@ -22,6 +22,17 @@ Parameters:
     Type: String
     Default: ""
     Description: "SNS platform application ARN for APNs sandbox. Empty disables registration for debug builds."
+  # 確認コードの差出人。SES で検証したドメインのアドレスにする。
+  # 空のときは Cognito のデフォルト送信のまま（1日50通・汎用の差出人）。
+  # SES がまだ検証中／サンドボックスのうちは空で運用できる。
+  VerifiedSenderEmail:
+    Type: String
+    Default: ""
+    Description: "Verified SES address used as the From of Cognito emails. Empty keeps Cognito default sending."
+  VerifiedSenderArn:
+    Type: String
+    Default: ""
+    Description: "ARN of the verified SES identity. Required when VerifiedSenderEmail is set."
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
@@ -35,6 +46,11 @@ Globals:
       Authorizers:
         CognitoAuthorizer:
           UserPoolArn: !GetAtt KotozuteUserPool.Arn
+
+Conditions:
+  # 差出人が指定されているときだけ SES 経由にする。
+  # 指定が無ければ Cognito のデフォルト送信を使い、デプロイは通る。
+  UseSes: !Not [!Equals [!Ref VerifiedSenderEmail, ""]]
 
 Resources:
   # メインテーブル（Single Table Design）。USER / PAIR / KOTOZUTE / INVITE を PK・SK で使い分ける。
@@ -76,6 +92,15 @@ Resources:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: kotozute-users
+      # 確認メールの送信元。SES 経由にすると Cognito の1日50通の上限から外れ、
+      # 独自ドメインの差出人になるので迷惑メール扱いされにくい。
+      # 差出人が未指定のときは丸ごと省略して、デフォルト送信のままにする。
+      EmailConfiguration: !If
+        - UseSes
+        - EmailSendingAccount: DEVELOPER
+          From: !Sub "ことづて <${VerifiedSenderEmail}>"
+          SourceArn: !Ref VerifiedSenderArn
+        - !Ref AWS::NoValue
       # ユーザー名の代わりにメールアドレスでログインさせる。
       UsernameAttributes:
         - email
