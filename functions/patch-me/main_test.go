@@ -211,3 +211,34 @@ func TestValidateDisplayName(t *testing.T) {
 		})
 	}
 }
+
+// 環境を取り違えると APNs に拒否され、エンドポイントが無効化されて
+// 二度と届かなくなる。省略時にどちらへ倒れるかも含めて押さえる。
+func TestPlatformApplicationFor(t *testing.T) {
+	platformApplicationArn = "arn:aws:sns:ap-northeast-1:1:app/APNS/kotozute"
+	platformApplicationArnSandbox = "arn:aws:sns:ap-northeast-1:1:app/APNS_SANDBOX/kotozute"
+	defer func() {
+		platformApplicationArn = ""
+		platformApplicationArnSandbox = ""
+	}()
+
+	tests := []struct {
+		name string
+		env  *string
+		want string
+	}{
+		{name: "sandbox は開発用", env: strPtr("sandbox"), want: platformApplicationArnSandbox},
+		{name: "production は配布用", env: strPtr("production"), want: platformApplicationArn},
+		// 配れば大半が配布ビルドなので、迷ったらそちらに倒す。
+		{name: "省略は配布用", env: nil, want: platformApplicationArn},
+		{name: "知らない値も配布用", env: strPtr("whatever"), want: platformApplicationArn},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := platformApplicationFor(tt.env); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
