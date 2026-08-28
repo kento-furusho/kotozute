@@ -107,6 +107,17 @@ Resources:
       # サインアップ時にメール宛の確認コードで本人確認する（メールを自動で検証対象にする）。
       AutoVerifiedAttributes:
         - email
+      # 確認コードのメール。既定は英語なので日本語にする。
+      # ここはシステムからの通知なので丁寧語にする（画面の説明は常体、という決めごとの例外）。
+      # {####} がコードに置き換わる。この置き換え文字が無いと CloudFormation が弾く。
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: "ことづて｜確認コード"
+        EmailMessage: |
+          <p>ことづての確認コードです。</p>
+          <p style="font-size:24px; font-weight:bold; letter-spacing:4px;">{####}</p>
+          <p>アプリの画面に入力してください。</p>
+          <p style="color:#8A7B6C; font-size:13px;">心当たりがない場合は、このメールを破棄してください。</p>
       # パスワードの最低条件。学習段階なので緩め（8文字以上・小文字・数字）にしておく。
       Policies:
         PasswordPolicy:
