@@ -27,11 +27,15 @@ const tableName = "kotozute"
 var dynamoClient *dynamodb.Client
 var snsClient *sns.Client
 
-// SNS のプラットフォームアプリケーション（APNs）の ARN。
-// APNs の認証キーを登録して初めて作れるので、それまでは空のままにしておく。
-// 空のときは端末の登録をせず、apnsToken の保存だけで済ませる（通知は飛ばない）。
-// あとで ARN を設定すれば、アプリが次にトークンを送ってきたときに登録される。
+// SNS のプラットフォームアプリケーション（APNs）の ARN。開発用と配布用で別物。
+//
+// 1つのバックエンドが両方の端末を相手にするが、トークンを見ても
+// どちらの環境のものかは分からない。端末が自分の環境を送ってくるので、それで選ぶ。
+// 取り違えると APNs に拒否され、エンドポイントが無効化されて二度と届かなくなる。
+//
+// 空のときはその環境の端末を登録せず、apnsToken の保存だけで済ませる。
 var platformApplicationArn string
+var platformApplicationArnSandbox string
 
 // userIDFromRequest はAPI Gatewayが検証済みのCognitoトークンから、ユーザーの一意なID（sub）を取り出す。
 // トークンが無い/壊れている場合は ok=false を返し、呼び出し側が401にする。
@@ -61,6 +65,7 @@ func init() {
 	})
 	snsClient = sns.NewFromConfig(cfg)
 	platformApplicationArn = os.Getenv("SNS_PLATFORM_APPLICATION_ARN")
+	platformApplicationArnSandbox = os.Getenv("SNS_PLATFORM_APPLICATION_ARN_SANDBOX")
 }
 
 // ポインタ型にすることで「JSONにキーが無い（nil）」と「空文字を送ってきた」を区別する。
@@ -68,6 +73,17 @@ func init() {
 type patchMeRequest struct {
 	DisplayName *string `json:"displayName"`
 	ApnsToken   *string `json:"apnsToken"`
+	// "sandbox" なら開発ビルド。省略・それ以外は配布ビルドとして扱う。
+	// 配れば大半が配布ビルドなので、迷ったらそちらに倒す。
+	ApnsEnvironment *string `json:"apnsEnvironment"`
+}
+
+// platformApplicationFor は端末の環境に合う SNS のプラットフォームアプリケーションを選ぶ。
+func platformApplicationFor(environment *string) string {
+	if environment != nil && *environment == "sandbox" {
+		return platformApplicationArnSandbox
+	}
+	return platformApplicationArn
 }
 
 // 表示名の上限。相手の画面では「◯◯からのことづて」の◯◯に入るので、
@@ -123,9 +139,9 @@ func buildUpdateExpression(req patchMeRequest, snsEndpointArn string) (string, m
 // 属性（CustomUserData など）が違う場合だけはエラーになる。そのエラー文に既存の ARN が
 // 入っているので、拾って使い回す。あわせてトークンを入れ直し、有効化もしておく
 // （APNs に弾かれた端末は Enabled=false のまま残るため、入れ直さないと二度と届かない）。
-func registerPushEndpoint(ctx context.Context, userID, token string) (string, error) {
+func registerPushEndpoint(ctx context.Context, platformArn, userID, token string) (string, error) {
 	out, err := snsClient.CreatePlatformEndpoint(ctx, &sns.CreatePlatformEndpointInput{
-		PlatformApplicationArn: aws.String(platformApplicationArn),
+		PlatformApplicationArn: aws.String(platformArn),
 		Token:                  aws.String(token),
 		// 誰の端末か分かるようにしておく。SNS 側から辿るときに要る。
 		CustomUserData: aws.String(userID),
@@ -198,8 +214,9 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	// 失敗しても 400/500 にはしない。apnsToken は保存されるし、アプリは起動のたびに
 	// トークンを送ってくるので、次の機会に登録し直せる。
 	snsEndpointArn := ""
-	if req.ApnsToken != nil && *req.ApnsToken != "" && platformApplicationArn != "" {
-		arn, err := registerPushEndpoint(ctx, userID, *req.ApnsToken)
+	platformArn := platformApplicationFor(req.ApnsEnvironment)
+	if req.ApnsToken != nil && *req.ApnsToken != "" && platformArn != "" {
+		arn, err := registerPushEndpoint(ctx, platformArn, userID, *req.ApnsToken)
 		if err != nil {
 			log.Printf("failed to register push endpoint for user %s: %v", userID, err)
 		} else {

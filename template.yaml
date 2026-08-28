@@ -11,10 +11,17 @@ Parameters:
   # それまでは空のままでよく、そのとき PATCH /me は端末を登録せず
   # apnsToken の保存だけを行う（通知は飛ばない）。
   # 設定するときは: sam deploy --parameter-overrides SnsPlatformApplicationArn=arn:aws:sns:...
+  # 配布ビルド（TestFlight / App Store）の端末が登録される先。
   SnsPlatformApplicationArn:
     Type: String
     Default: ""
-    Description: "SNS platform application ARN for APNs. Empty disables device registration."
+    Description: "SNS platform application ARN for APNs (production). Empty disables device registration."
+  # 開発ビルド（Xcode から実機に入れたもの）の端末が登録される先。
+  # 1つのバックエンドが両方を相手にするので、端末が自分の環境を送ってきて選ぶ。
+  SnsPlatformApplicationArnSandbox:
+    Type: String
+    Default: ""
+    Description: "SNS platform application ARN for APNs sandbox. Empty disables registration for debug builds."
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
@@ -286,6 +293,7 @@ Resources:
         Variables:
           DYNAMODB_ENDPOINT: ""
           SNS_PLATFORM_APPLICATION_ARN: !Ref SnsPlatformApplicationArn
+          SNS_PLATFORM_APPLICATION_ARN_SANDBOX: !Ref SnsPlatformApplicationArnSandbox
 
   PatchPairFunction:
     Type: AWS::Serverless::Function
