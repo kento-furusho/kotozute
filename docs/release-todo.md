@@ -10,14 +10,15 @@
   - [x] 端末が `apnsEnvironment` を送り、サーバーが宛先を選ぶ（省略時は配布用）
   - [x] `aps-environment` をビルド構成ごとに出し分け（Debug=development / Release=production）
   - [ ] **配布ビルドでの実機受信は未確認**。TestFlight に上げるまで試せない
-- [ ] **2. 確認メールを SES に切り替える**
+- [x] **2. 確認メールを SES に切り替える**
   - [x] ドメイン `kotozute.app` を取得（Cloudflare Registrar、DNS も Cloudflare）
   - [x] SES でドメインを検証。**DKIM 署名まで有効**（`VerifiedForSendingStatus: true`）
   - [x] `template.yaml` に差出人のパラメータを用意。**未指定なら Cognito のデフォルト送信のまま**なので、
         サンドボックスのうちは切り替えずに置ける
-  - [ ] **SES 本番アクセスの申請**（要・手作業）。いまサンドボックスで、
-        検証済みアドレス宛にしか送れない。**ここを通さずに差出人を切り替えると新規登録が壊れる**
-  - [ ] 本番アクセスが通ったら `sam deploy --parameter-overrides` で差出人を渡して切り替え
+  - [x] SES 本番アクセスの申請が通った（1日50,000通）
+  - [x] 差出人を `ことづて <noreply@kotozute.app>` に切り替え。`samconfig.toml` に
+        パラメータを書いたので、ふだんの `sam deploy` で維持される
+  - [ ] **届いたかの最終確認**（Gmail の受信箱で、迷惑メールに入っていないかを見る）
 - [ ] **3. App Store Connect の準備**
   - [ ] アプリの枠を作る（バンドルID `dev.kotozute.app` は登録済み）
   - [ ] スクリーンショット、説明文、プライバシー情報
