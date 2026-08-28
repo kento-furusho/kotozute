@@ -5,15 +5,19 @@
 
 ## 必ず要る
 
-- [ ] **1. APNs を本番に切り替える**
-  - [ ] 本番用の SNS プラットフォームアプリケーション（`APNS`）を作る（`.p8` は開発用と同じものが使える）
-  - [ ] 開発ビルドと配布ビルドで宛先を切り替えられるようにする
-        （1つのバックエンドが両方の端末を相手にするので、どちらのエンドポイントに
-        登録するかを端末側から伝える必要がある）
-  - [ ] `aps-environment` をビルド構成ごとに出し分ける（Debug=development / Release=production）
+- [x] **1. APNs を本番に切り替える**
+  - [x] 本番用の SNS プラットフォームアプリケーション `app/APNS/kotozute-apns` を作成
+  - [x] 端末が `apnsEnvironment` を送り、サーバーが宛先を選ぶ（省略時は配布用）
+  - [x] `aps-environment` をビルド構成ごとに出し分け（Debug=development / Release=production）
+  - [ ] **配布ビルドでの実機受信は未確認**。TestFlight に上げるまで試せない
 - [ ] **2. 確認メールを SES に切り替える**
-  - いまは `COGNITO_DEFAULT`。**1日50通の上限**があり、人が増えると登録できなくなる
-  - 独自ドメインの取得が前提
+  - [x] ドメイン `kotozute.app` を取得（Cloudflare Registrar、DNS も Cloudflare）
+  - [x] SES でドメインを検証。**DKIM 署名まで有効**（`VerifiedForSendingStatus: true`）
+  - [x] `template.yaml` に差出人のパラメータを用意。**未指定なら Cognito のデフォルト送信のまま**なので、
+        サンドボックスのうちは切り替えずに置ける
+  - [ ] **SES 本番アクセスの申請**（要・手作業）。いまサンドボックスで、
+        検証済みアドレス宛にしか送れない。**ここを通さずに差出人を切り替えると新規登録が壊れる**
+  - [ ] 本番アクセスが通ったら `sam deploy --parameter-overrides` で差出人を渡して切り替え
 - [ ] **3. App Store Connect の準備**
   - [ ] アプリの枠を作る（バンドルID `dev.kotozute.app` は登録済み）
   - [ ] スクリーンショット、説明文、プライバシー情報
