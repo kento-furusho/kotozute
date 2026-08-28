@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -152,11 +153,18 @@ func dissolvePair(ctx context.Context, pairID, userID string) error {
 	if partner := partnerUserID(out.Item, userID); partner != "" {
 		items = append(items, types.TransactWriteItem{
 			Update: &types.Update{
-				TableName:        aws.String(tableName),
-				Key:              userKey(partner),
-				UpdateExpression: aws.String("REMOVE pairId"),
+				TableName: aws.String(tableName),
+				Key:       userKey(partner),
+				// 解消の時刻を刻む。次のペアの区切りの下限になる。
+				// これが無いと、この関係で書いた分が相手の次の相手に流れる。
+				UpdateExpression: aws.String("REMOVE pairId SET lastPairEndedAt = :endedAt"),
 				// 相手が先に消えている場合もある。そのときは何もしない。
 				ConditionExpression: aws.String("attribute_exists(PK)"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":endedAt": &types.AttributeValueMemberS{
+						Value: time.Now().UTC().Format(time.RFC3339),
+					},
+				},
 			},
 		})
 	}

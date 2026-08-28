@@ -30,6 +30,10 @@ const (
 	// サイクルの区切りの初期値。遠い過去にしておくことで、
 	// ペア成立前に書いた分（オンボーディングの「最初の1枚」）も
 	// 最初の書くサイクルに入る。成立日時にすると範囲から外れてしまう。
+	//
+	// ただし過去にペアを解消した人がいる場合は、その時刻まで下限を上げる
+	// （initialCycleStart）。遠い過去のままだと、前の相手に向けて書いた分が
+	// 次の相手の最初のオープンで全部見えてしまう。
 	beginningOfTime = "1970-01-01T00:00:00Z"
 )
 
@@ -69,6 +73,21 @@ type acceptRequest struct {
 
 type acceptResponse struct {
 	PairID string `json:"pairId"`
+}
+
+// initialCycleStart は新しいペアの区切りの初期値を決める純粋関数。
+//
+// ふたりの lastPairEndedAt のうち遅いほうを使う。どちらも初めてなら遠い過去。
+// 前の関係で書いたことづてを次の相手に渡さないための境目。
+func initialCycleStart(endedAtList ...string) string {
+	start := beginningOfTime
+	for _, endedAt := range endedAtList {
+		// ISO8601 は辞書順が時刻順と一致するので、文字列のまま比べてよい。
+		if endedAt > start {
+			start = endedAt
+		}
+	}
+	return start
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -159,6 +178,23 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		displayName = "パートナー"
 	}
 
+	// 招待した側の解消履歴も見る。どちらかが前のペアを解消していれば、
+	// 新しいサイクルはそこから始める。
+	inviterUserOut, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", inviterUserID.Value)},
+			"SK": &types.AttributeValueMemberS{Value: "META"},
+		},
+	})
+	if err != nil {
+		return errorResponse(http.StatusInternalServerError, "failed to fetch inviter"), nil
+	}
+	cycleStart := initialCycleStart(
+		lastPairEndedAt(inviterUserOut.Item),
+		lastPairEndedAt(acceptingUserOut.Item),
+	)
+
 	now := time.Now().UTC()
 
 	_, err = dynamoClient.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
@@ -197,8 +233,12 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 						"status":        &types.AttributeValueMemberS{Value: "active"},
 						// サイクルの区切りは2つ。成立時は両方を同じ値にして、
 						// 読むサイクルを空（＝まだ何もオープンされていない）から始める。
-						"cycleStartedAt":         &types.AttributeValueMemberS{Value: beginningOfTime},
-						"previousCycleStartedAt": &types.AttributeValueMemberS{Value: beginningOfTime},
+						"cycleStartedAt":         &types.AttributeValueMemberS{Value: cycleStart},
+						"previousCycleStartedAt": &types.AttributeValueMemberS{Value: cycleStart},
+						// 区切りの履歴もここから始める。週ごとに遡るのに使う。
+						"cycleStarts": &types.AttributeValueMemberL{
+							Value: []types.AttributeValue{&types.AttributeValueMemberS{Value: cycleStart}},
+						},
 					},
 					ConditionExpression: aws.String("attribute_not_exists(PK)"),
 				},
@@ -251,6 +291,13 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		Body:       string(resBody),
 	}, nil
+}
+
+func lastPairEndedAt(item map[string]types.AttributeValue) string {
+	if v, ok := item["lastPairEndedAt"].(*types.AttributeValueMemberS); ok {
+		return v.Value
+	}
+	return ""
 }
 
 // isInviteExpired はINVITE METAのttl（unix epoch秒）と現在時刻を比較する。

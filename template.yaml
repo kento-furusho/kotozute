@@ -375,6 +375,33 @@ Resources:
           SNS_PLATFORM_APPLICATION_ARN: !Ref SnsPlatformApplicationArn
           SNS_PLATFORM_APPLICATION_ARN_SANDBOX: !Ref SnsPlatformApplicationArnSandbox
 
+  # DELETE /pair（ペア解消）。アカウントは残る。
+  # 解消の時刻を両者に刻み、次のペアの区切りの下限にする。
+  DeletePairFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/delete-pair/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: kotozute
+      Events:
+        DeletePair:
+          Type: Api
+          Properties:
+            Path: /pair
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
   PatchPairFunction:
     Type: AWS::Serverless::Function
     Metadata:
