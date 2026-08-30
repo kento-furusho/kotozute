@@ -118,3 +118,42 @@ func TestErrorResponse(t *testing.T) {
 		t.Errorf("expected error message %q, got %q", "invite has already been used", body["error"])
 	}
 }
+
+// ここを間違えると、前の相手に向けて書いたことづてが
+// 次の相手の最初のオープンで全部見えてしまう。
+func TestInitialCycleStart(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{
+			name: "どちらも初めてなら遠い過去（オンボーディングの1枚目を拾う）",
+			in:   []string{"", ""},
+			want: beginningOfTime,
+		},
+		{
+			name: "片方に解消履歴があればそこから",
+			in:   []string{"2026-08-01T00:00:00Z", ""},
+			want: "2026-08-01T00:00:00Z",
+		},
+		{
+			name: "両方あるなら遅いほう",
+			in:   []string{"2026-08-01T00:00:00Z", "2026-08-20T00:00:00Z"},
+			want: "2026-08-20T00:00:00Z",
+		},
+		{
+			name: "順序が逆でも遅いほう",
+			in:   []string{"2026-08-20T00:00:00Z", "2026-08-01T00:00:00Z"},
+			want: "2026-08-20T00:00:00Z",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := initialCycleStart(tt.in...); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
