@@ -5,18 +5,19 @@
 - `terms.html` … 利用規約
 - `privacy.html` … プライバシーポリシー
 
-## 公開する前に埋めるもの
+## 差し替え済みの値
 
-`REPLACE_` で始まる箇所を差し替える。埋めずに公開すると、そのまま表示される。
-
-| 差し替え文字列 | 入れるもの |
+| | |
 |---|---|
-| `REPLACE_OPERATOR_NAME` | 運営者名（個人名または屋号） |
-| `REPLACE_CONTACT_EMAIL` | 問い合わせ先のメールアドレス |
+| 運営者 | 古庄健人（Kento Furusho） |
+| 連絡先 | support@kotozute.app |
 
-```bash
-grep -rn REPLACE_ web/
-```
+運営者名にローマ字を併記しているのは、Apple の開発者登録名が `kento furusho` で、
+個人アカウントではこれが App Store の販売者名としてそのまま表示されるため。
+漢字だけだと表記が食い違って見える。
+
+連絡先は Cloudflare Email Routing で Gmail へ転送している。
+`noreply@kotozute.app` は SES の送信元なので、問い合わせ先には使わない。
 
 ## 公開先
 
