@@ -28,10 +28,14 @@ Cloudflare で配信する。リポジトリ直下の `wrangler.jsonc` が、こ
 `npx wrangler deploy` になる）。そのため「静的アセットのみの Worker」として置いている。
 コードは無く、`assets.directory` に `./web` を指すだけ。
 
-公開後の URL:
+公開後の URL は **`.html` を付けない**。Cloudflare の静的アセット配信は
+`.html` 付きのリクエストを拡張子なしへ 307 で正規化するため、付けると
+毎回リダイレクトを挟むことになる。
 
-- `https://kotozute.app/terms.html`
-- `https://kotozute.app/privacy.html`
+- `https://kotozute.app/terms`
+- `https://kotozute.app/privacy`
+
+ページ同士のリンクも拡張子なしで書く。
 
 `main` に push すると自動でデプロイされる。**ページを直したら本番に出る**ので、
 下書きのまま push しない。
