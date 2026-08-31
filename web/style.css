@@ -1,0 +1,32 @@
+/* ことづての法務ページ。アプリの見た目に合わせた最小限の体裁。 */
+:root {
+  --bg: #f7f2e9;
+  --ink: #3a322c;
+  --ink-soft: #8a7b6c;
+  --accent: #e4573d;
+  --line: #e7ddcd;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 48px 20px 96px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  line-height: 1.9;
+  font-size: 16px;
+}
+main { max-width: 720px; margin: 0 auto; }
+a { color: var(--accent); }
+h1 { font-size: 26px; margin: 0 0 8px; }
+h2 { font-size: 18px; margin: 40px 0 12px; padding-top: 20px; border-top: 1px solid var(--line); }
+h2:first-of-type { border-top: 0; padding-top: 0; }
+.updated { color: var(--ink-soft); font-size: 14px; margin: 0 0 32px; }
+.lead { color: var(--ink-soft); }
+ul, ol { padding-left: 1.4em; }
+li { margin-bottom: 6px; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 15px; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--ink-soft); font-weight: 600; white-space: nowrap; }
+.note { background: #fffdf8; border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 20px 0; }
+footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 14px; }
