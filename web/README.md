@@ -21,11 +21,20 @@
 
 ## 公開先
 
-DNS が Cloudflare にあるので、Cloudflare Pages が素直。
-このディレクトリをそのまま配信すれば、以下の URL になる。
+Cloudflare で配信する。リポジトリ直下の `wrangler.jsonc` が、このディレクトリを
+そのまま配信する設定になっている。
+
+いまのダッシュボードは Git 連携で **Pages ではなく Worker を作る**（デプロイ コマンドが
+`npx wrangler deploy` になる）。そのため「静的アセットのみの Worker」として置いている。
+コードは無く、`assets.directory` に `./web` を指すだけ。
+
+公開後の URL:
 
 - `https://kotozute.app/terms.html`
 - `https://kotozute.app/privacy.html`
+
+`main` に push すると自動でデプロイされる。**ページを直したら本番に出る**ので、
+下書きのまま push しない。
 
 ## 注意
 

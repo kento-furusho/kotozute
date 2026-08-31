@@ -1,0 +1,13 @@
+{
+  // 規約とプライバシーポリシーの静的ページを配信するだけの設定。
+  // Cloudflare の新しいダッシュボードは Pages ではなく Worker を作るので、
+  // 「静的アセットのみの Worker」として置く。コードは書かない。
+  //
+  // ダッシュボードの「デプロイ コマンド」は npx wrangler deploy のままでよい。
+  // このファイルを見て web/ の中身を配信する。
+  "name": "kotozute",
+  "compatibility_date": "2026-08-31",
+  "assets": {
+    "directory": "./web"
+  }
+}
