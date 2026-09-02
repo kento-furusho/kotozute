@@ -111,8 +111,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	// 誰のことづてを見るか。partner の場合は PAIR META から相手を解決する。
 	targetUser := userID
 	partnerOnly := false
-	// 相手の分を見せてよい上限。読むサイクルより前＝すでに読み終えた分だけ。
+	// 相手の分を見せてよい範囲。上限は読むサイクルより前＝すでに読み終えた分だけ。
+	// 下限はいまのペアが始まった時刻。前の関係で書かれた分をここで落とす。
 	openedBefore := ""
+	pairStartedAt := ""
 	if q.Whose == "partner" {
 		members, err := getPairMembers(ctx, pairID)
 		if err != nil {
@@ -121,7 +123,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		targetUser = partnerUserID(members, userID)
 		partnerOnly = true
 
-		openedBefore, err = getPreviousCycleStartedAt(ctx, pairID)
+		pairStartedAt, openedBefore, err = partnerVisibleRange(ctx, pairID)
 		if err != nil {
 			return errorResponse(http.StatusInternalServerError, "failed to fetch pair"), nil
 		}
@@ -153,9 +155,19 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	// 相手の過去分は「読み終えたサイクル」だけ見せる（過去ロックの緩和）。
 	// いま解禁されているサイクルは相互ロックの対象なので、ここには出さない。
 	// 出すと、書いていない人がアーカイブ経由でロックを迂回できてしまう。
+	//
+	// 下限も要る。上限だけだと、ペア解消のあとに組んだ相手が「解消時刻より前」の
+	// 条件を満たしてしまい、**前の関係で書かれたことづてを全部読めた**。
+	// this-week 側は区切りの下限を解消時刻まで上げて塞いであったが、
+	// アーカイブは別経路なので同じ穴が残っていた。
 	if partnerOnly {
-		input.FilterExpression = aws.String("createdAt < :openedBefore")
 		input.ExpressionAttributeValues[":openedBefore"] = &types.AttributeValueMemberS{Value: openedBefore}
+		if pairStartedAt == "" {
+			input.FilterExpression = aws.String("createdAt < :openedBefore")
+		} else {
+			input.FilterExpression = aws.String("createdAt >= :pairStartedAt AND createdAt < :openedBefore")
+			input.ExpressionAttributeValues[":pairStartedAt"] = &types.AttributeValueMemberS{Value: pairStartedAt}
+		}
 	}
 
 	out, err := dynamoClient.Query(ctx, input)
@@ -327,13 +339,23 @@ func partnerUserID(members pairMembers, myUserID string) string {
 	return members.Member1
 }
 
-// getPreviousCycleStartedAt は PAIR META から「読むサイクルの開始時刻」を読む。
+// partnerVisibleRange は PAIR META から、アーカイブで相手の分を見せてよい範囲を読む。
+// 返すのは [ペアが始まった時刻, 読むサイクルの開始時刻)。
 //
-// アーカイブで相手の分を見せてよいのは、これより前に書かれたもの＝すでに読み終えた
-// サイクルまで。読むサイクル（[previousCycleStartedAt, cycleStartedAt)）は、いま
-// 相互ロックの対象になっているので、ここに含めてはいけない。
+// **上限**（読むサイクルの開始時刻＝previousCycleStartedAt）:
+// ここより前＝すでに読み終えたサイクルだけ見せる。読むサイクル
+// （[previousCycleStartedAt, cycleStartedAt)）はいま相互ロックの対象なので含めない。
 // cycleStartedAt で絞ると読むサイクルまで入り、ロックを迂回して読めてしまう。
-func getPreviousCycleStartedAt(ctx context.Context, pairID string) (string, error) {
+//
+// **下限**（ペアが始まった時刻＝cycleStarts の先頭）:
+// 前の関係で書かれた分を落とす。上限だけにすると、解消して別の相手と組んだとき、
+// 新しい相手が「解消時刻より前」の条件を満たす**過去のことづてを全部**読めた。
+// 規約・プライバシーポリシーに書いた「解消より前に書いた分は、以後に組む相手には
+// 表示されません」と食い違っていた。
+//
+// cycleStarts が無いペアでは下限を空で返し、これまでどおり上限だけで絞る。
+// 下限を previousCycleStartedAt などで代用すると、読めていた過去が急に消える。
+func partnerVisibleRange(ctx context.Context, pairID string) (pairStartedAt, openedBefore string, err error) {
 	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
 		Key: map[string]types.AttributeValue{
@@ -342,12 +364,18 @@ func getPreviousCycleStartedAt(ctx context.Context, pairID string) (string, erro
 		},
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if v, ok := out.Item["previousCycleStartedAt"].(*types.AttributeValueMemberS); ok {
-		return v.Value, nil
+		openedBefore = v.Value
 	}
-	return "", nil
+	// cycleStarts は古い順。先頭がこのペアの始まり。
+	if v, ok := out.Item["cycleStarts"].(*types.AttributeValueMemberL); ok && len(v.Value) > 0 {
+		if first, ok := v.Value[0].(*types.AttributeValueMemberS); ok {
+			pairStartedAt = first.Value
+		}
+	}
+	return pairStartedAt, openedBefore, nil
 }
 
 func getUserPairID(ctx context.Context, userID string) (string, error) {
