@@ -57,7 +57,7 @@ GSI（2個）:
 ### 主なアクセスパターン
 - 書くサイクルの自分のことづて: `PK=USER#<自分>, SK BETWEEN KOTOZUTE#<cycleStartedAt> AND KOTOZUTE#￿`
 - 読むサイクルの相手のことづて: `PK=USER#<相手>, SK BETWEEN KOTOZUTE#<previousCycleStartedAt> AND KOTOZUTE#<cycleStartedAt>`
-- アーカイブ（月ごと）: `PK=USER#<誰か>, SK begins_with KOTOZUTE#<年月>`（相手は `previousCycleStartedAt` より前のみ）
+- アーカイブ（月ごと）: `PK=USER#<誰か>, SK begins_with KOTOZUTE#<年月>`（相手は `[cycleStarts[0], previousCycleStartedAt)` のみ）
 - ログイン: GSI② `PK=EMAIL#<addr>`
 - バッチ対象ペア検索: GSI① `PK=openDayOfWeek=5`
 - 自分の情報/ペア: `GetItem USER#<id>/META` → pairId 取得
@@ -107,7 +107,8 @@ GET /kotozute/archive?whose=me|partner&from=<ISO>&to=<ISO>          # 週ごと�
 - Dynamo の LastEvaluatedKey を Base64 等で不透明化して cursor に使う
 - `year`/`month` は同じ月内のみ。`from`/`to` は月をまたいでよい（週の範囲を渡す）
 - `from`/`to` は UTC に揃えてから使う。SK の比較は文字列の辞書順なので、書き方が違うと範囲がずれる
-- `whose=partner` は `previousCycleStartedAt` より前のみ（読むサイクルは相互ロックの対象なので出さない）
+- `whose=partner` は `[cycleStarts[0], previousCycleStartedAt)` のみ。上限は読むサイクル（相互ロックの対象）を、
+  下限は前の関係で書かれた分を、それぞれ落とすため
 - `items` が `limit` に達したら `nextCursor` が付く。**続きは必ずたどること**。
   とくに `whose=partner` は絞り込みが `limit` の後に効くので、`items` が少なくても続きが残っていることがある
 
@@ -149,6 +150,8 @@ previousCycleStartedAt        cycleStartedAt              現在
 - 初回：ペア成立（invite accept）時に両方を **遠い過去（1970-01-01）** で初期化する。
   読むサイクルは空（＝オープン前）になり、**ペア成立前に書いた分も最初の書くサイクルに入る**。
   成立日時で初期化すると、オンボーディングで書いた「最初の1枚」が最初のサイクルから外れてしまう。
+  ただし**下限はふたりの `lastPairEndedAt` まで上げる**（`initialCycleStart`）。
+  遠い過去のままだと、前の相手に向けて書いた分が次の相手の最初のサイクルに入る。
 
 **区切りの履歴（`cycleStarts`）**：オープンのたびに開始時刻を積んでいく（古い順）。
 隣り合う2つが1週間の範囲になる。直近2つだけでは過去の週を復元できず、
@@ -185,9 +188,19 @@ EventBridge(曜日×時刻) → Lambda
 - **読むサイクル**（いま解禁されている分）：厳格（相互ロック）。`GET /kotozute/this-week` だけが返す。
 - **それより前**（読み終えたサイクル）：寛容。オープン済みなら見られる（自分がその週書いたかは問わない）。
 
-実装は `GET /kotozute/archive?whose=partner` を **`previousCycleStartedAt` より前**で絞る。
-`cycleStartedAt` で絞ると読むサイクルまで入り、書いていない人がアーカイブ経由で
-相互ロックを迂回して読めてしまう（一度そうなっていた）。
+実装は `GET /kotozute/archive?whose=partner` を
+**`[cycleStarts[0]`（いまのペアが始まった時刻）`, previousCycleStartedAt)`** で絞る。**上下とも要る。**
+
+- **上限**：`cycleStartedAt` で絞ると読むサイクルまで入り、書いていない人がアーカイブ経由で
+  相互ロックを迂回して読めてしまう（一度そうなっていた）。
+- **下限**：上限だけにすると、ペア解消のあとに組んだ相手が「解消時刻より前」の条件を満たし、
+  **前の関係で書かれたことづてを全部読めた**（これもそうなっていた）。
+  this-week 側は `initialCycleStart` で区切りの下限を上げて塞いであったが、
+  アーカイブは別経路なので同じ穴が残っていた。規約・プライバシーポリシーに書いた
+  「解消より前に書いた分は、以後に組む相手には表示されません」と食い違う。
+
+**教訓：相手の本文を返す経路は2つある**（`this-week` と `archive`）。
+片方を塞いだら、必ずもう片方も同じ条件で塞ぐ。
 
 ### 状態遷移・編集/削除
 - ことづて：書く →（オープン前：下書き、本人のみ、編集可）→ 週一オープン → 確定（変更不可）
