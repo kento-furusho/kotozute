@@ -87,9 +87,17 @@ type thisWeekResponse struct {
 	// 相手の本文を見せてよいか。判断はサーバーで済ませる。
 	CanSeePartner bool           `json:"canSeePartner"`
 	LastCycle     lastCycleBlock `json:"lastCycle"`
-	// 相手がいま書いているサイクルに1枚以上書いたか。枚数は返さない。
-	PartnerHasWritten bool   `json:"partnerHasWritten"`
-	NextOpenAt        string `json:"nextOpenAt"`
+	// 相手がいま書いているサイクルに1枚以上書いたか。
+	PartnerHasWritten bool `json:"partnerHasWritten"`
+	// その枚数。本文は返さない（本文を出してよいかは CanSeePartner が決める）。
+	//
+	// もとは枚数を伏せていた。数が見えると点数表になり、
+	// 「催促でなく事実」という気配の置き方から外れるという判断だった。
+	// ただ、枚数を伏せたまま付箋の絵を出すと、絵の枚数が事実と食い違う。
+	// 絵を出すと決めた以上、数は本当のものを渡す。
+	// プライバシーポリシーも合わせて直してある。
+	PartnerWrittenCount int    `json:"partnerWrittenCount"`
+	NextOpenAt          string `json:"nextOpenAt"`
 }
 
 type pairMeta struct {
@@ -125,12 +133,13 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 			return errorResponse(http.StatusInternalServerError, "failed to fetch kotozute"), nil
 		}
 		return okJSON(thisWeekResponse{
-			MyKotozute:        toResponseItems(myCurrent),
-			OpenStatus:        "before",
-			CanSeePartner:     false,
-			LastCycle:         lastCycleBlock{Mine: []kotozuteResponseItem{}},
-			PartnerHasWritten: false,
-			NextOpenAt:        "",
+			MyKotozute:          toResponseItems(myCurrent),
+			OpenStatus:          "before",
+			CanSeePartner:       false,
+			LastCycle:           lastCycleBlock{Mine: []kotozuteResponseItem{}},
+			PartnerHasWritten:   false,
+			PartnerWrittenCount: 0,
+			NextOpenAt:          "",
 		})
 	}
 
@@ -207,9 +216,10 @@ func buildThisWeekResponse(myPrevious, myCurrent, partnerPrevious, partnerCurren
 		// 直前のサイクルは、次のオープンまで手元で読めるようにする（アーカイブにも残る）。
 		// 自分の分は常に返す。相手の分は解禁されたときだけ。
 		LastCycle: lastCycleBlock{Mine: toResponseItems(myPrevious)},
-		// 気配は「いま書いているサイクル」の話。枚数は返さない。
-		PartnerHasWritten: len(partnerCurrent) > 0,
-		NextOpenAt:        nextOpenAt,
+		// 気配は「いま書いているサイクル」の話。
+		PartnerHasWritten:   len(partnerCurrent) > 0,
+		PartnerWrittenCount: len(partnerCurrent),
+		NextOpenAt:          nextOpenAt,
 	}
 	if canSeePartner {
 		res.LastCycle.Partner = toResponseItems(partnerPrevious)
