@@ -9,7 +9,9 @@
   - [x] 本番用の SNS プラットフォームアプリケーション `app/APNS/kotozute-apns` を作成
   - [x] 端末が `apnsEnvironment` を送り、サーバーが宛先を選ぶ（省略時は配布用）
   - [x] `aps-environment` をビルド構成ごとに出し分け（Debug=development / Release=production）
-  - [ ] **配布ビルドでの実機受信は未確認**。TestFlight に上げるまで試せない
+  - [x] **配布ビルドでの実機受信を確認**（2026-09-03）。TestFlight のビルド 1.0(1) を実機に入れ、
+        本番の `app/APNS/kotozute-apns` に登録されたエンドポイントへ SNS から送って着信を確認した。
+        Debug ビルドと分かれて `APNS` 側に入ることも確認済み
 - [x] **2. 確認メールを SES に切り替える**
   - [x] ドメイン `kotozute.app` を取得（Cloudflare Registrar、DNS も Cloudflare）
   - [x] SES でドメインを検証。**DKIM 署名まで有効**（`VerifiedForSendingStatus: true`）
@@ -21,9 +23,20 @@
   - [x] Gmail の受信箱に届くことを確認（迷惑メール送りにならない）
   - [x] 確認コードのメールを日本語にした
 - [ ] **3. App Store Connect の準備**
-  - [ ] アプリの枠を作る（バンドルID `dev.kotozute.app` は登録済み）
-  - [ ] スクリーンショット、説明文、プライバシー情報
+  - [x] アプリの枠を作った。掲載名は **ことづて｜大切な人とありがとうをためる**
+        （`ことづて` は他で使われていて取れない。ホーム画面に出る名前は
+        `CFBundleDisplayName` が別に持つので `ことづて` のまま）
+  - [x] アイコンを用意（`Assets.xcassets`。無いとアップロードが弾かれる）
+  - [x] ビルド 1.0(1) をアップロードし、内部テストで実機に配信できた
+  - [ ] スクリーンショット（6.9インチ必須）、説明文、プライバシー情報
   - [ ] **審査用のデモアカウント**（ペア成立済みのものを2つ）
+  - **ビルドは `INTERNAL_ONLY` で上げてある。** 外部テストや審査に出すときは
+    Xcode の Distribute で「TestFlight & App Store」を選んで上げ直す
+    （API で `APP_STORE_ELIGIBLE` へ変えることもできるが、戻せない一方通行）
+  - App Store Connect API のキーを発行済み（`~/.appstoreconnect/private_keys/`）。
+    画面の表示と実態が食い違うときは、API で状態を直接確かめる。
+    実際、内部テスターが `NOT_INVITED` のまま止まっていたのはこれで分かった
+    （画面に再招待のボタンが無く、`POST /v1/betaTesterInvitations` で送った）
 - [ ] **4. テスト用の仕掛けの扱いを決める**
   - `#if DEBUG` で囲ってあるので配布ビルドには入らない。残すか消すかの判断だけ
   - 「見る」画面の**オープンを試す**ボタン／起動引数 `--tab` `--screen` `--demo-state` `--invite`
