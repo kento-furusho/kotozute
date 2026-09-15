@@ -51,11 +51,15 @@ func init() {
 
 type patchKotozuteRequest struct {
 	Body string `json:"body"`
+	// 付箋の色。6桁の16進数。省略すると色は触らない。
+	// "none" を渡すと色を外す（並び順で決める見た目に戻す）。
+	Color string `json:"color"`
 }
 
 type kotozuteResponse struct {
-	ID   string `json:"id"`
-	Body string `json:"body"`
+	ID    string `json:"id"`
+	Body  string `json:"body"`
+	Color string `json:"color,omitempty"`
 }
 
 // foundKotozute は検索で見つけたことづての、更新に必要な情報。
@@ -81,6 +85,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 	if req.Body == "" {
 		return errorResponse(http.StatusBadRequest, "body is required"), nil
+	}
+	color, clearColor, ok := parseColorUpdate(req.Color)
+	if !ok {
+		return errorResponse(http.StatusBadRequest, "color must be a 6-digit hex"), nil
 	}
 
 	pairID, err := getUserPairID(ctx, userID)
@@ -134,13 +142,11 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 						"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("USER#%s", userID)},
 						"SK": &types.AttributeValueMemberS{Value: found.SK},
 					},
-					UpdateExpression: aws.String("SET #body = :body"),
+					UpdateExpression: aws.String(colorUpdateExpression(color, clearColor)),
 					ExpressionAttributeNames: map[string]string{
 						"#body": "body",
 					},
-					ExpressionAttributeValues: map[string]types.AttributeValue{
-						":body": &types.AttributeValueMemberS{Value: req.Body},
-					},
+					ExpressionAttributeValues: colorUpdateValues(req.Body, color),
 				},
 			},
 		},
@@ -154,7 +160,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return errorResponse(http.StatusInternalServerError, "failed to update kotozute"), nil
 	}
 
-	resBody, err := json.Marshal(kotozuteResponse{ID: kotozuteID, Body: req.Body})
+	resBody, err := json.Marshal(kotozuteResponse{ID: kotozuteID, Body: req.Body, Color: color})
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to build response"), nil
 	}
@@ -251,6 +257,57 @@ func errorResponse(statusCode int, message string) events.APIGatewayProxyRespons
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		Body:       string(body),
 	}
+}
+
+// parseColorUpdate は色の指定を読む。
+//
+//	""     … 触らない（色は今のまま）
+//	"none" … 外す（並び順で決める見た目に戻す）
+//	16進6桁 … その色にする
+//
+// 「触らない」と「外す」を分けるのは、書き直しのたびに色が消えるのを防ぐため。
+// 省略＝消す にすると、本文だけ直したいときに色まで失われる。
+func parseColorUpdate(value string) (color string, clear bool, ok bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", false, true
+	}
+	if trimmed == "none" {
+		return "", true, true
+	}
+	trimmed = strings.TrimPrefix(trimmed, "#")
+	if len(trimmed) != 6 {
+		return "", false, false
+	}
+	for _, r := range trimmed {
+		isDigit := r >= '0' && r <= '9'
+		isHex := (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+		if !isDigit && !isHex {
+			return "", false, false
+		}
+	}
+	return strings.ToUpper(trimmed), false, true
+}
+
+func colorUpdateExpression(color string, clear bool) string {
+	switch {
+	case clear:
+		return "SET #body = :body REMOVE color"
+	case color != "":
+		return "SET #body = :body, color = :color"
+	default:
+		return "SET #body = :body"
+	}
+}
+
+func colorUpdateValues(body, color string) map[string]types.AttributeValue {
+	values := map[string]types.AttributeValue{
+		":body": &types.AttributeValueMemberS{Value: body},
+	}
+	if color != "" {
+		values[":color"] = &types.AttributeValueMemberS{Value: color}
+	}
+	return values
 }
 
 func main() {

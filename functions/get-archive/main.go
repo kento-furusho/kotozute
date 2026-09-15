@@ -72,6 +72,8 @@ type archiveItem struct {
 	ID        string `json:"id"`
 	Body      string `json:"body"`
 	CreatedAt string `json:"createdAt"`
+	// 選ばれていれば6桁の16進数。無ければキーごと出ない（画面が並び順で決める）。
+	Color string `json:"color,omitempty"`
 }
 
 type archiveResponse struct {
@@ -327,6 +329,10 @@ func parseArchiveItem(av map[string]types.AttributeValue) (archiveItem, bool) {
 	}
 	if v, ok := av["createdAt"].(*types.AttributeValueMemberS); ok {
 		item.CreatedAt = v.Value
+	}
+	// 色は選んだときだけ入っている。
+	if v, ok := av["color"].(*types.AttributeValueMemberS); ok {
+		item.Color = v.Value
 	}
 	return item, true
 }

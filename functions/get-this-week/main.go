@@ -63,12 +63,15 @@ type kotozuteItem struct {
 	ID        string
 	Body      string
 	CreatedAt string
+	Color     string
 }
 
 type kotozuteResponseItem struct {
 	ID        string `json:"id"`
 	Body      string `json:"body"`
 	CreatedAt string `json:"createdAt"`
+	// 選ばれていれば6桁の16進数。無ければキーごと出ない（画面が並び順で決める）。
+	Color string `json:"color,omitempty"`
 }
 
 // lastCycleBlock は直前にオープンされたサイクルの中身。
@@ -230,7 +233,12 @@ func buildThisWeekResponse(myPrevious, myCurrent, partnerPrevious, partnerCurren
 func toResponseItems(items []kotozuteItem) []kotozuteResponseItem {
 	res := make([]kotozuteResponseItem, 0, len(items))
 	for _, it := range items {
-		res = append(res, kotozuteResponseItem{ID: it.ID, Body: it.Body, CreatedAt: it.CreatedAt})
+		res = append(res, kotozuteResponseItem{
+			ID:        it.ID,
+			Body:      it.Body,
+			CreatedAt: it.CreatedAt,
+			Color:     it.Color,
+		})
 	}
 	return res
 }
@@ -302,11 +310,16 @@ func parseKotozuteItem(av map[string]types.AttributeValue) (kotozuteItem, error)
 		return kotozuteItem{}, fmt.Errorf("createdAt missing or invalid type")
 	}
 
-	return kotozuteItem{
+	item := kotozuteItem{
 		ID:        parts[2],
 		Body:      body.Value,
 		CreatedAt: createdAt.Value,
-	}, nil
+	}
+	// 色は選んだときだけ入っている。無ければ空のまま返す。
+	if color, ok := av["color"].(*types.AttributeValueMemberS); ok {
+		item.Color = color.Value
+	}
+	return item, nil
 }
 
 func getPairMeta(ctx context.Context, pairID string) (pairMeta, error) {
