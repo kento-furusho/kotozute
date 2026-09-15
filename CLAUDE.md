@@ -39,7 +39,7 @@
 | PK | SK | 主な属性 |
 |---|---|---|
 | USER#<id> | META | email, displayName, apnsToken, pairId |
-| USER#<id> | KOTOZUTE#<ISO日時>#<ことづてid> | body, createdAt |
+| USER#<id> | KOTOZUTE#<ISO日時>#<ことづてid> | body, createdAt, color |
 | PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, timezone, status, cycleStartedAt, previousCycleStartedAt, cycleStarts |
 | INVITE#<token> | META | inviterUserId, status, ttl |
 
@@ -75,7 +75,7 @@ GSI（2個）:
 - `POST /invites/{token}/accept` — 招待を受けてペア成立
 - `GET /pair` — ペア情報
 - `PATCH /pair` — オープン曜日・時刻の変更
-- `POST /kotozute` — ことづてを書く（**ペア未成立でも書ける**）
+- `POST /kotozute` — ことづてを書く（**ペア未成立でも書ける**）。`color` で付箋の色を指定できる
 - `GET /kotozute/this-week` — 今週の状態をまとめて取る（相互ロック内包。下記）
 - `PATCH /kotozute/{id}` — 編集（オープン前・本文のみ。サーバーで可否判定）
 - `GET /kotozute/archive` — アーカイブ（カーソルページング）
@@ -203,6 +203,17 @@ EventBridge(曜日×時刻) → Lambda
 
 **教訓：相手の本文を返す経路は2つある**（`this-week` と `archive`）。
 片方を塞いだら、必ずもう片方も同じ条件で塞ぐ。
+
+### 付箋の色（ことづてごと）
+色は**ことづてに付く**。書いた人が1枚ごとに選び、相手の画面でもその色で出る。
+人に紐づく設定ではない。
+
+- 保存するのは**6桁の16進数を1つだけ**（`"FFDC72"`）。先頭の `#` は落とし、大文字に揃える。
+  紙のグラデーションの明るいほうは、クライアントが白を 0.34 混ぜて作る
+- **選んだときだけ属性を置く。** 空文字を入れると「黒を選んだ」と区別がつかない。
+  色を持たないことづては、画面が並び順から決める（既存のデータはこれ）
+- 書き直し（`PATCH /kotozute/{id}`）は **省略＝触らない／`"none"`＝外す**。
+  省略を「消す」にすると、本文だけ直したいときに色まで失われる
 
 ### 状態遷移・編集/削除
 - ことづて：書く →（オープン前：下書き、本人のみ、編集可）→ 週一オープン → 確定（変更不可）
