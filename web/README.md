@@ -2,8 +2,11 @@
 
 `kotozute.app` に置く静的ページ。App Store の審査で URL を求められる。
 
+- `index.html` … トップページ。**無いとルートが 404 になり、中身も Content-Type も
+  空の応答をブラウザがダウンロードしようとする**（実際にそうなっていた）
 - `terms.html` … 利用規約
 - `privacy.html` … プライバシーポリシー
+- `support.html` … サポート（問い合わせ先と FAQ）
 
 ## 差し替え済みの値
 
