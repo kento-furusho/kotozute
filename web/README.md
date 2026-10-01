@@ -22,6 +22,9 @@
 連絡先は Cloudflare Email Routing で Gmail へ転送している。
 `noreply@kotozute.app` は SES の送信元なので、問い合わせ先には使わない。
 
+このファイル自身は配信しない。`web/.assetsignore` に書いてある
+（Wrangler の静的アセットは、このファイルに書いたものを配信対象から外す）。
+
 ## 公開先
 
 Cloudflare で配信する。リポジトリ直下の `wrangler.jsonc` が、このディレクトリを
