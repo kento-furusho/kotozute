@@ -97,23 +97,23 @@ func TestBuildNotifications(t *testing.T) {
 		}
 	})
 
-	t.Run("片方だけ書いた", func(t *testing.T) {
+	// 自分だけ書いた週に「オープンしました」が飛んでいた。開いても何も増えていない。
+	t.Run("片方だけ書いた場合、書いた人には通知しない", func(t *testing.T) {
 		got := buildNotifications(pair, true, false, "けんと", "あい")
-		if len(got) != 2 {
-			t.Fatalf("expected 2 notifications, got %d", len(got))
+		if len(got) != 1 {
+			t.Fatalf("expected 1 notification, got %d: %+v", len(got), got)
 		}
-		// member1（書いた）→ オープン通知
-		if got[0].UserID != "k01" || got[0].Message != "今週のことづて、オープンしました" {
-			t.Errorf("member1 notification wrong: %+v", got[0])
-		}
-		// member2（書いてない）→ 相手（けんと）の名前入りの促し
-		if got[1].UserID != "k02" || got[1].Message != "あなたが1つ書くと、けんとのことづても見られます" {
-			t.Errorf("member2 notification wrong: %+v", got[1])
+		// 書いていない member2 にだけ、相手（けんと）の名前入りで知らせる。
+		if got[0].UserID != "k02" || got[0].Message != "あなたが1つ書くと、けんとのことづても見られます" {
+			t.Errorf("notification wrong: %+v", got[0])
 		}
 	})
 
 	t.Run("両者書いた", func(t *testing.T) {
 		got := buildNotifications(pair, true, true, "けんと", "あい")
+		if len(got) != 2 {
+			t.Fatalf("expected 2 notifications, got %d", len(got))
+		}
 		for _, n := range got {
 			if n.Message != "今週のことづて、オープンしました" {
 				t.Errorf("expected open message, got %q", n.Message)

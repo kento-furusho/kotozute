@@ -244,17 +244,24 @@ func openPair(ctx context.Context, pair pairMeta, now time.Time) error {
 }
 
 // buildNotifications は通知の出し分けを決める純粋関数。
-// - 両者ゼロ（誰も書いていない）→ 通知しない（空）
-// - 書いた人 → 「今週のことづて、オープンしました」
-// - 書いてない人 → 「あなたが1つ書くと、○○のことづても見られます」（催促でなく事実）
+//
+// **誰に送るかは「相手が書いたか」で決まる。** 自分が書いたかではない。
+// 自分だけ書いた週に「オープンしました」と知らせると、開いても何も増えていない。
+// 相手が0枚なら、その人には新しく読めるものが無いので黙っている（気配も出さない方針と揃う）。
+//
+// 相手が1枚以上あるとき、文面は自分が書いたかで分かれる:
+//   - 自分も書いた   → 「今週のことづて、オープンしました」（そのまま読める）
+//   - 自分は書いてない → 「あなたが1つ書くと、◯◯のことづても見られます」（催促でなく事実）
 func buildNotifications(pair pairMeta, wroteMember1, wroteMember2 bool, name1, name2 string) []notification {
-	if !wroteMember1 && !wroteMember2 {
-		return nil
+	var out []notification
+	// member1 の相手は member2。相手が書いていれば知らせる。
+	if wroteMember2 {
+		out = append(out, notificationFor(pair.Member1, wroteMember1, name2))
 	}
-	return []notification{
-		notificationFor(pair.Member1, wroteMember1, name2), // member1 の相手は member2
-		notificationFor(pair.Member2, wroteMember2, name1),
+	if wroteMember1 {
+		out = append(out, notificationFor(pair.Member2, wroteMember2, name1))
 	}
+	return out
 }
 
 func notificationFor(userID string, wrote bool, partnerName string) notification {
