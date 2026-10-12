@@ -42,6 +42,7 @@
 | USER#<id> | KOTOZUTE#<ISO日時>#<ことづてid> | body, createdAt, color |
 | PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, timezone, status, cycleStartedAt, previousCycleStartedAt, cycleStarts |
 | INVITE#<token> | META | inviterUserId, status, ttl |
+| DEVICE#<APNsトークン> | META | userId（この端末の持ち主） |
 
 GSI（2個）:
 - **GSI①（曜日）**: openDayOfWeek を PK → 週一バッチが「今日オープンすべきペア」を検索
@@ -53,6 +54,10 @@ GSI（2個）:
   - **所有者がキーで表現される**。自分のパーティションしか引けないので、他人のことづてを編集する経路が構造的に存在しない
 - 「ユーザー→ペア」は USER の META に pairId を持たせて解決（1人1ペア前提、GSI不要）
 - 「招待」はトークンで直引き（GetItem）のため GSI 不要
+- **端末は最後に登録したアカウントだけのもの**（`DEVICE#<トークン>`）。`PATCH /me` で端末を登録するとき、
+  前の持ち主が別人ならそちらから `apnsToken`/`snsEndpointArn` を外す。`apnsToken: ""` は「外す」（サインアウト用）。
+  これが無いと、同じ端末でアカウントを切り替えたとき**前のアカウント宛ての通知が次の人の端末に届いた**
+  （通知文には相手の名前が入る）
 
 ### 主なアクセスパターン
 - 書くサイクルの自分のことづて: `PK=USER#<自分>, SK BETWEEN KOTOZUTE#<cycleStartedAt> AND KOTOZUTE#￿`
