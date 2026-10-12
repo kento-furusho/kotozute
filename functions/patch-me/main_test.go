@@ -56,6 +56,21 @@ func TestBuildUpdateExpression(t *testing.T) {
 			wantValueLen: 2,
 		},
 		{
+			// サインアウト。空文字を SET すると宛先が残り、前のアカウント宛ての通知が届き続けた。
+			name:         "空のトークンは端末の登録を外す",
+			req:          patchMeRequest{ApnsToken: strPtr("")},
+			wantOK:       true,
+			wantExpr:     "REMOVE apnsToken, snsEndpointArn",
+			wantValueLen: 0,
+		},
+		{
+			name:         "表示名の変更と端末の解除を同時に",
+			req:          patchMeRequest{DisplayName: strPtr("けんと"), ApnsToken: strPtr("")},
+			wantOK:       true,
+			wantExpr:     "SET displayName = :displayName REMOVE apnsToken, snsEndpointArn",
+			wantValueLen: 1,
+		},
+		{
 			name:   "どちらも無し（更新対象なし）",
 			req:    patchMeRequest{},
 			wantOK: false,

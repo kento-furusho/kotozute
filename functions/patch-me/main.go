@@ -106,30 +106,46 @@ func validateDisplayName(name string) (string, string) {
 	return trimmed, ""
 }
 
-// buildUpdateExpression は、nil でないフィールドだけを SET する UpdateExpression と
+// buildUpdateExpression は、nil でないフィールドだけを更新する UpdateExpression と
 // その値マップを組み立てる純粋関数。更新対象が1つも無ければ ok=false を返す。
 //
 // snsEndpointArn は端末の登録に成功したときだけ渡ってくる。空なら触らない
 // （登録に失敗しても apnsToken の保存は済ませたいので、更新対象から外すだけにする）。
+//
+// **apnsToken が空文字なら「この端末の登録を外す」。** サインアウトのときに送られてくる。
+// 空文字を SET すると宛先（snsEndpointArn）だけが残り、サインアウトしたあとも
+// 前のアカウント宛ての通知がその端末に届き続ける（実際にそうなっていた）。
 func buildUpdateExpression(req patchMeRequest, snsEndpointArn string) (string, map[string]types.AttributeValue, bool) {
 	setClauses := make([]string, 0, 3)
+	removeClauses := make([]string, 0, 3)
 	values := map[string]types.AttributeValue{}
 	if req.DisplayName != nil {
 		setClauses = append(setClauses, "displayName = :displayName")
 		values[":displayName"] = &types.AttributeValueMemberS{Value: *req.DisplayName}
 	}
 	if req.ApnsToken != nil {
-		setClauses = append(setClauses, "apnsToken = :apnsToken")
-		values[":apnsToken"] = &types.AttributeValueMemberS{Value: *req.ApnsToken}
+		if *req.ApnsToken == "" {
+			removeClauses = append(removeClauses, "apnsToken", "snsEndpointArn")
+		} else {
+			setClauses = append(setClauses, "apnsToken = :apnsToken")
+			values[":apnsToken"] = &types.AttributeValueMemberS{Value: *req.ApnsToken}
+		}
 	}
 	if snsEndpointArn != "" {
 		setClauses = append(setClauses, "snsEndpointArn = :snsEndpointArn")
 		values[":snsEndpointArn"] = &types.AttributeValueMemberS{Value: snsEndpointArn}
 	}
-	if len(setClauses) == 0 {
+	if len(setClauses) == 0 && len(removeClauses) == 0 {
 		return "", nil, false
 	}
-	return "SET " + strings.Join(setClauses, ", "), values, true
+	parts := make([]string, 0, 2)
+	if len(setClauses) > 0 {
+		parts = append(parts, "SET "+strings.Join(setClauses, ", "))
+	}
+	if len(removeClauses) > 0 {
+		parts = append(parts, "REMOVE "+strings.Join(removeClauses, ", "))
+	}
+	return strings.Join(parts, " "), values, true
 }
 
 // registerPushEndpoint は端末のトークンを SNS に登録し、そのエンドポイントARNを返す。
@@ -190,6 +206,96 @@ func existingEndpointARN(err error) (string, bool) {
 	return arn, true
 }
 
+// 端末の持ち主。1台の端末は、いちばん最後に登録したアカウントだけのものにする。
+//
+//	PK=DEVICE#<APNsトークン>  SK=META  userId=<持ち主>
+//
+// これが無いと、同じ端末で別のアカウントに切り替えたとき、前のアカウントにも
+// 宛先が残る。前のアカウント宛ての通知（相手の名前が入る）が次の人の端末に届く。
+// トークンで直引きできるので GSI は要らない。
+func deviceKey(token string) map[string]types.AttributeValue {
+	return map[string]types.AttributeValue{
+		"PK": &types.AttributeValueMemberS{Value: "DEVICE#" + token},
+		"SK": &types.AttributeValueMemberS{Value: "META"},
+	}
+}
+
+// claimDevice はこの端末を userID のものにする。前の持ち主が別人なら、そちらから宛先を外す。
+//
+// 外すのは「前の持ち主がまだこのトークンを持っている」ときだけ。
+// その人がすでに別の端末に移っていれば、そちらの登録は触らない。
+func claimDevice(ctx context.Context, userID, token string) error {
+	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
+		Key:       deviceKey(token),
+	})
+	if err != nil {
+		return err
+	}
+	if v, ok := out.Item["userId"].(*types.AttributeValueMemberS); ok && v.Value != userID {
+		_, err := dynamoClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+			TableName: aws.String(tableName),
+			Key: map[string]types.AttributeValue{
+				"PK": &types.AttributeValueMemberS{Value: "USER#" + v.Value},
+				"SK": &types.AttributeValueMemberS{Value: "META"},
+			},
+			UpdateExpression:    aws.String("REMOVE apnsToken, snsEndpointArn"),
+			ConditionExpression: aws.String("apnsToken = :token"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":token": &types.AttributeValueMemberS{Value: token},
+			},
+		})
+		var condErr *types.ConditionalCheckFailedException
+		if err != nil && !errors.As(err, &condErr) {
+			return err
+		}
+	}
+	item := deviceKey(token)
+	item["userId"] = &types.AttributeValueMemberS{Value: userID}
+	_, err = dynamoClient.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(tableName),
+		Item:      item,
+	})
+	return err
+}
+
+// releaseDevice は、この端末の持ち主が userID なら記録を消す。
+// 別の人がすでに持ち主になっていれば触らない。
+func releaseDevice(ctx context.Context, userID, token string) error {
+	if token == "" {
+		return nil
+	}
+	_, err := dynamoClient.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName:           aws.String(tableName),
+		Key:                 deviceKey(token),
+		ConditionExpression: aws.String("userId = :me"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":me": &types.AttributeValueMemberS{Value: userID},
+		},
+	})
+	var condErr *types.ConditionalCheckFailedException
+	if err != nil && !errors.As(err, &condErr) {
+		return err
+	}
+	return nil
+}
+
+// currentToken は、いま userID に登録されているトークンを返す（無ければ空）。
+func currentToken(ctx context.Context, userID string) string {
+	out, err := dynamoClient.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName:            aws.String(tableName),
+		Key:                  map[string]types.AttributeValue{"PK": &types.AttributeValueMemberS{Value: "USER#" + userID}, "SK": &types.AttributeValueMemberS{Value: "META"}},
+		ProjectionExpression: aws.String("apnsToken"),
+	})
+	if err != nil {
+		return ""
+	}
+	if v, ok := out.Item["apnsToken"].(*types.AttributeValueMemberS); ok {
+		return v.Value
+	}
+	return ""
+}
+
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	userID, ok := userIDFromRequest(request)
 	if !ok {
@@ -224,10 +330,21 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		}
 	}
 
-	// 送られてきた項目だけを SET する UpdateExpression を組み立てる。
+	// 外すときは、消す前にいまのトークンを控えておく（端末の持ち主の記録を消すのに要る）。
+	releasing := req.ApnsToken != nil && *req.ApnsToken == ""
+	previousToken := ""
+	if releasing {
+		previousToken = currentToken(ctx, userID)
+	}
+
+	// 送られてきた項目だけを更新する UpdateExpression を組み立てる。
 	updateExpression, values, ok := buildUpdateExpression(req, snsEndpointArn)
 	if !ok {
 		return errorResponse(http.StatusBadRequest, "nothing to update"), nil
+	}
+	// 値を使わない式（REMOVE だけ）に空のマップを渡すと DynamoDB が弾く。
+	if len(values) == 0 {
+		values = nil
 	}
 
 	_, err := dynamoClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
@@ -246,6 +363,18 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 			return errorResponse(http.StatusNotFound, "user not registered"), nil
 		}
 		return errorResponse(http.StatusInternalServerError, "failed to update user"), nil
+	}
+
+	// 端末の持ち主を付け替える。失敗しても本体の更新は済んでいるので、ログだけ残す
+	// （アプリは起動のたびに送り直すので、次の機会にまた付け替わる）。
+	if releasing {
+		if err := releaseDevice(ctx, userID, previousToken); err != nil {
+			log.Printf("failed to release device for user %s: %v", userID, err)
+		}
+	} else if req.ApnsToken != nil {
+		if err := claimDevice(ctx, userID, *req.ApnsToken); err != nil {
+			log.Printf("failed to claim device for user %s: %v", userID, err)
+		}
 	}
 
 	// 更新後の値を返す（送られた項目のみ反映）。

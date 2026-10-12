@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -104,6 +105,25 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 			EndpointArn: aws.String(arn),
 		}); err != nil {
 			log.Printf("failed to delete SNS endpoint for user %s: %v", userID, err)
+		}
+	}
+	// 端末の持ち主の記録（DEVICE#<トークン>）も消す。持ち主がこの人のときだけ
+	// （同じ端末で別のアカウントに切り替え済みなら、そちらのものなので残す）。
+	if token := stringAttr(meta, "apnsToken"); token != "" {
+		_, err := dynamoClient.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+			TableName: aws.String(tableName),
+			Key: map[string]types.AttributeValue{
+				"PK": &types.AttributeValueMemberS{Value: "DEVICE#" + token},
+				"SK": &types.AttributeValueMemberS{Value: "META"},
+			},
+			ConditionExpression: aws.String("userId = :me"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":me": &types.AttributeValueMemberS{Value: userID},
+			},
+		})
+		var condErr *types.ConditionalCheckFailedException
+		if err != nil && !errors.As(err, &condErr) {
+			log.Printf("failed to release device for user %s: %v", userID, err)
 		}
 	}
 
