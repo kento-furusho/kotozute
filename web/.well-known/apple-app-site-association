@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["5V6S74G5N9.dev.kotozute.app"],
+        "components": [
+          { "/": "/invite/*", "comment": "招待リンク。アプリが入っていればアプリで開く" }
+        ]
+      }
+    ]
+  }
+}
