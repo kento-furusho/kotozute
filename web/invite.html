@@ -26,14 +26,17 @@
 「ことづて」は、大切な人と日々の「ありがとう」を書きためるアプリです。
 </p>
 
-<div class="step">
-  <b>1. アプリをダウンロードしてください</b>
-  <a class="button" href="https://apps.apple.com/jp/app/id6807755962">App Store で見る</a>
+<div class="step" id="open-step" hidden>
+  <b>アプリをお持ちの方</b>
+  このボタンからアプリを開くと、そのまま二人のペアが組まれます。
+  <br><a class="button" id="open" href="#">アプリで開く</a>
 </div>
 
 <div class="step">
-  <b>2. 登録したら、このリンクをもう一度開いてください</b>
-  アプリが開いて、そのまま二人のペアが組まれます。
+  <b>はじめての方</b>
+  1. アプリをダウンロードしてください。
+  <br><a class="button" href="https://apps.apple.com/jp/app/id6807755962">App Store で見る</a>
+  <p style="margin:12px 0 0">2. 登録したら、このページに戻って「アプリで開く」を押してください。</p>
 </div>
 
 <div class="step" id="code-step" hidden>
@@ -53,6 +56,11 @@
   // 文字の種類を絞ってから textContent で入れる（URL に何を書かれても画面に式として解釈させない）。
   const token = location.pathname.replace(/^\/invite\/?/, "").replace(/\/$/, "");
   if (/^[A-Za-z0-9_-]{8,128}$/.test(token)) {
+    // アプリで開くボタンは独自スキームのリンクにする。ユニバーサルリンクは
+    // LINE などのアプリ内ブラウザや、iPhone 側の状態によっては働かず、このページが出る。
+    // 独自スキームなら、アプリが入っていればどのブラウザからでも開ける。
+    document.getElementById("open").href = "kotozute://invite/" + token;
+    document.getElementById("open-step").hidden = false;
     document.getElementById("code").textContent = token;
     document.getElementById("code-step").hidden = false;
     document.getElementById("copy").addEventListener("click", async (event) => {
