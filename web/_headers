@@ -1,0 +1,4 @@
+# Apple はこのファイルを JSON として読む。拡張子が無いので、型を明示しないと
+# application/octet-stream で返り、検証に失敗することがある。
+/.well-known/apple-app-site-association
+  Content-Type: application/json

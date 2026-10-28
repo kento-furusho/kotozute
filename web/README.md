@@ -7,6 +7,12 @@
 - `terms.html` … 利用規約
 - `privacy.html` … プライバシーポリシー
 - `support.html` … サポート（問い合わせ先と FAQ）
+- `invite.html` … 招待ページ。`/invite/<トークン>` を `_redirects` でこれに向ける。
+  アプリが入っていない人が招待リンクを押したときに出る（App Store への案内とコード）。
+  アプリが入っていれば、iOS がこのページを開かずにアプリを開く
+- `.well-known/apple-app-site-association` … ユニバーサルリンクの設定。`/invite/*` を
+  アプリ（`5V6S74G5N9.dev.kotozute.app`）で開いてよいと Apple に伝える。
+  `_headers` で `Content-Type: application/json` を付けている（拡張子が無いので型を明示する）
 
 ## 差し替え済みの値
 
