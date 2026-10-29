@@ -56,6 +56,8 @@ type patchPairRequest struct {
 	OpenDayOfWeek *int    `json:"openDayOfWeek"`
 	OpenTime      *string `json:"openTime"`
 	Timezone      *string `json:"timezone"`
+	// オープンの周期（週）。1〜4。
+	OpenIntervalWeeks *int `json:"openIntervalWeeks"`
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -112,6 +114,9 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	if req.Timezone != nil {
 		res["timezone"] = *req.Timezone
 	}
+	if req.OpenIntervalWeeks != nil {
+		res["openIntervalWeeks"] = *req.OpenIntervalWeeks
+	}
 	resBody, err := json.Marshal(res)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to build response"), nil
@@ -123,6 +128,12 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		Body:       string(resBody),
 	}, nil
 }
+
+// オープンの周期として選べる範囲（週）。
+const (
+	minIntervalWeeks = 1
+	maxIntervalWeeks = 4
+)
 
 // buildPairUpdate は送られた項目を検証しつつ UpdateExpression と値マップを組み立てる純粋関数。
 // 不正な値があれば errMsg（400用メッセージ）を返す。更新対象がゼロでも errMsg を返す。
@@ -150,6 +161,15 @@ func buildPairUpdate(req patchPairRequest) (string, map[string]types.AttributeVa
 		}
 		setClauses = append(setClauses, "timezone = :timezone")
 		values[":timezone"] = &types.AttributeValueMemberS{Value: *req.Timezone}
+	}
+
+	if req.OpenIntervalWeeks != nil {
+		// 週単位で1〜4。長すぎると「書いたのに何週も読めない」になり、続かない。
+		if *req.OpenIntervalWeeks < minIntervalWeeks || *req.OpenIntervalWeeks > maxIntervalWeeks {
+			return "", nil, "openIntervalWeeks must be between 1 and 4"
+		}
+		setClauses = append(setClauses, "openIntervalWeeks = :openIntervalWeeks")
+		values[":openIntervalWeeks"] = &types.AttributeValueMemberN{Value: strconv.Itoa(*req.OpenIntervalWeeks)}
 	}
 
 	if len(setClauses) == 0 {

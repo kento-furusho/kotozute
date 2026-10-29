@@ -36,6 +36,26 @@ func TestBuildPairUpdate(t *testing.T) {
 			wantClauses: 2,
 		},
 		{
+			name:        "周期を2週ごとに",
+			req:         patchPairRequest{OpenIntervalWeeks: intPtr(2)},
+			wantClauses: 1,
+		},
+		{
+			name:        "曜日・時刻・周期をまとめて",
+			req:         patchPairRequest{OpenDayOfWeek: intPtr(5), OpenTime: strPtr("20:00"), OpenIntervalWeeks: intPtr(4)},
+			wantClauses: 3,
+		},
+		{
+			name:       "周期が0",
+			req:        patchPairRequest{OpenIntervalWeeks: intPtr(0)},
+			wantErrMsg: "openIntervalWeeks must be between 1 and 4",
+		},
+		{
+			name:       "周期が5週（長すぎる）",
+			req:        patchPairRequest{OpenIntervalWeeks: intPtr(5)},
+			wantErrMsg: "openIntervalWeeks must be between 1 and 4",
+		},
+		{
 			name:       "曜日が範囲外(7)",
 			req:        patchPairRequest{OpenDayOfWeek: intPtr(7)},
 			wantErrMsg: "openDayOfWeek must be between 0 and 6",
