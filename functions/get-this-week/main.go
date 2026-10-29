@@ -111,8 +111,10 @@ type pairMeta struct {
 	OpenDayOfWeek          int
 	OpenTime               string
 	Timezone               string
-	Member1                string // ペアの片方のユーザーID
-	Member2                string // ペアのもう片方のユーザーID
+	// オープンの周期（週）。属性が無ければ毎週（1）。
+	OpenIntervalWeeks int
+	Member1           string // ペアの片方のユーザーID
+	Member2           string // ペアのもう片方のユーザーID
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -367,6 +369,11 @@ func buildPairMetaFromItem(item map[string]types.AttributeValue) pairMeta {
 	if v, ok := item["timezone"].(*types.AttributeValueMemberS); ok {
 		meta.Timezone = v.Value
 	}
+	if v, ok := item["openIntervalWeeks"].(*types.AttributeValueMemberN); ok {
+		if n, err := strconv.Atoi(v.Value); err == nil {
+			meta.OpenIntervalWeeks = n
+		}
+	}
 	if v, ok := item["member1"].(*types.AttributeValueMemberS); ok {
 		meta.Member1 = v.Value
 	}
@@ -403,27 +410,58 @@ func partnerUserID(meta pairMeta, myUserID string) string {
 	return meta.Member1
 }
 
-// computeNextOpenAt はmetaのopenDayOfWeek/openTime/timezoneから直近の次回オープン日時を算出する。
-// バッチ・PATCH /pairが未実装の現段階では、metaがデフォルト値の場合この値は近似値に過ぎない。
+// computeNextOpenAt は次回オープン日時を算出する（周期を含む）。
 func computeNextOpenAt(meta pairMeta, now time.Time) (string, error) {
-	loc, err := time.LoadLocation(meta.Timezone)
+	next, err := nextOpenMoment(meta.OpenDayOfWeek, meta.OpenTime, meta.Timezone, meta.CycleStartedAt, meta.OpenIntervalWeeks, now)
+	if err != nil {
+		return "", err
+	}
+	return next.Format("2006-01-02T15:04"), nil
+}
+
+// minOpenGap は、前回のオープンから次のオープンまでに空ける最短の間隔。
+// 周期が N 週なら (N − 0.5) 週。毎週なら3.5日、2週ごとなら10.5日。
+//
+// オープンの曜日は毎週めぐってくるので、周期が2週以上のときはこの間隔で振り分ける
+// （2週ごとなら、1週目は7日 < 10.5日で見送り、2週目に14日で開く）。
+// 曜日や周期を変えた直後に、前回から1日しか経っていないのに開いてしまうことも防ぐ。
+//
+// この計算は weekly-open / get-me / get-pair / get-this-week で同じものを使う。
+// 片方だけ変えると、アプリに出る「次のオープン」と実際に開く日がずれる。
+func minOpenGap(intervalWeeks int) time.Duration {
+	if intervalWeeks < 1 {
+		intervalWeeks = 1
+	}
+	return time.Duration(intervalWeeks*7*24-84) * time.Hour
+}
+
+// nextOpenMoment は次のオープン日時を返す純粋関数。
+// now より後で、かつ前回のオープン（cycleStartedAt）から minOpenGap 以上あいた、最初のオープン曜日・時刻。
+func nextOpenMoment(openDayOfWeek int, openTime, timezone, cycleStartedAt string, intervalWeeks int, now time.Time) (time.Time, error) {
+	loc, err := time.LoadLocation(timezone)
 	if err != nil {
 		loc = time.UTC
 	}
 	nowInLoc := now.In(loc)
 
-	hour, minute, err := parseHHMM(meta.OpenTime)
+	hour, minute, err := parseHHMM(openTime)
 	if err != nil {
-		return "", err
+		return time.Time{}, err
 	}
 
-	daysUntil := (meta.OpenDayOfWeek - int(nowInLoc.Weekday()) + 7) % 7
+	daysUntil := (openDayOfWeek - int(nowInLoc.Weekday()) + 7) % 7
 	candidate := time.Date(nowInLoc.Year(), nowInLoc.Month(), nowInLoc.Day(), hour, minute, 0, 0, loc).
 		AddDate(0, 0, daysUntil)
 	if !candidate.After(nowInLoc) {
 		candidate = candidate.AddDate(0, 0, 7)
 	}
-	return candidate.Format("2006-01-02T15:04"), nil
+	if started, err := time.Parse(time.RFC3339, cycleStartedAt); err == nil {
+		// 周期は最大4週なので、5回進めれば必ず届く。壊れた値で回り続けないよう上限を置く。
+		for i := 0; i < 5 && candidate.Sub(started) < minOpenGap(intervalWeeks); i++ {
+			candidate = candidate.AddDate(0, 0, 7)
+		}
+	}
+	return candidate, nil
 }
 
 func parseHHMM(s string) (int, int, error) {

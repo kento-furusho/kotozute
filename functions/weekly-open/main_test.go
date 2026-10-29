@@ -115,7 +115,7 @@ func TestBuildNotifications(t *testing.T) {
 			t.Fatalf("expected 2 notifications, got %d", len(got))
 		}
 		for _, n := range got {
-			if n.Message != "今週のことづて、オープンしました" {
+			if n.Message != "ことづてがオープンしました" {
 				t.Errorf("expected open message, got %q", n.Message)
 			}
 		}
@@ -145,7 +145,7 @@ func TestBuildPairMeta(t *testing.T) {
 // 素の文字列を渡すと送信は成功して見えるのに端末には何も出ないので、
 // 形が崩れていないかをここで押さえる。
 func TestBuildPushPayload(t *testing.T) {
-	const message = "今週のことづて、オープンしました"
+	const message = "ことづてがオープンしました"
 	const arn = "arn:aws:sns:ap-northeast-1:123456789012:endpoint/APNS_SANDBOX/kotozute/abc-def"
 
 	raw, err := buildPushPayload(arn, message)
@@ -212,4 +212,64 @@ func TestPlatformFromEndpointARN(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestShouldOpenInterval は周期と、前回からの間隔の判定。
+func TestShouldOpenInterval(t *testing.T) {
+	// 2026-08-07 は金曜。オープンは金曜 20:00（日本時間）で、その5分後にバッチが走った想定。
+	now := mustParse(t, "2026-08-07T20:05:00+09:00")
+	base := pairMeta{OpenDayOfWeek: 5, OpenTime: "20:00", Timezone: "Asia/Tokyo"}
+	tests := []struct {
+		name           string
+		cycleStartedAt string
+		intervalWeeks  int
+		want           bool
+	}{
+		{"毎週：前回は1週間前", "2026-07-31T11:00:00Z", 1, true},
+		{"2週ごと：前回は1週間前なので見送る", "2026-07-31T11:00:00Z", 2, false},
+		{"2週ごと：前回は2週間前なので開く", "2026-07-24T11:00:00Z", 2, true},
+		{"今日すでに開いている（二重オープン防止）", "2026-08-07T11:00:30Z", 1, false},
+		// 以前は、前回（木曜）から1日しか経っていなくても開いていた。
+		{"曜日を変えた直後で前回から1日しかない", "2026-08-06T11:00:00Z", 1, false},
+		{"ペア成立直後（遠い過去）", "1970-01-01T00:00:00Z", 4, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := base
+			p.CycleStartedAt = tt.cycleStartedAt
+			p.OpenIntervalWeeks = tt.intervalWeeks
+			if got := shouldOpen(p, now); got != tt.want {
+				t.Errorf("shouldOpen() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestShouldOpenMatchesNextOpenMoment は、アプリに出る「次のオープン」の時刻にバッチが実際に開くこと、
+// その1週間前には開かないことを確かめる。2つの計算が食い違うと、表示と実際がずれる。
+func TestShouldOpenMatchesNextOpenMoment(t *testing.T) {
+	asOf := mustParse(t, "2026-08-03T09:00:00+09:00")
+	for _, weeks := range []int{1, 2, 3, 4} {
+		p := pairMeta{OpenDayOfWeek: 5, OpenTime: "20:00", Timezone: "Asia/Tokyo",
+			CycleStartedAt: "2026-07-31T11:00:00Z", OpenIntervalWeeks: weeks}
+		next, err := nextOpenMoment(p.OpenDayOfWeek, p.OpenTime, p.Timezone, p.CycleStartedAt, weeks, asOf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !shouldOpen(p, next.Add(5*time.Minute)) {
+			t.Errorf("%d週ごと: 次のオープン %s に開かない", weeks, next)
+		}
+		if weeks > 1 && shouldOpen(p, next.AddDate(0, 0, -7).Add(5*time.Minute)) {
+			t.Errorf("%d週ごと: 次のオープンの1週間前に開いてしまう", weeks)
+		}
+	}
+}
+
+func mustParse(t *testing.T, v string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		t.Fatalf("failed to parse %q: %v", v, err)
+	}
+	return parsed
 }
