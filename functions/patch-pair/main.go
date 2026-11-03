@@ -76,6 +76,12 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	if errMsg != "" {
 		return errorResponse(http.StatusBadRequest, errMsg), nil
 	}
+	// オープンのペースを最後に決めた人を残す。ペアを組んだ直後の画面で、
+	// あとから開いた人に「◯◯が決めたペース」と見せるのに使う。
+	if touchesSchedule(req) {
+		updateExpression += ", scheduleSetBy = :scheduleSetBy"
+		values[":scheduleSetBy"] = &types.AttributeValueMemberS{Value: userID}
+	}
 
 	// ことづての pairID と同様、トークンのユーザーを起点にペアを辿る。
 	pairID, err := getUserPairID(ctx, userID)
@@ -127,6 +133,12 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		Body:       string(resBody),
 	}, nil
+}
+
+// touchesSchedule は、オープンの曜日・時刻・周期のどれかを変えるリクエストか。
+// タイムゾーンだけの変更は、ペースを決めたことにはしない。
+func touchesSchedule(req patchPairRequest) bool {
+	return req.OpenDayOfWeek != nil || req.OpenTime != nil || req.OpenIntervalWeeks != nil
 }
 
 // オープンの周期として選べる範囲（週）。

@@ -40,7 +40,7 @@
 |---|---|---|
 | USER#<id> | META | email, displayName, apnsToken, pairId |
 | USER#<id> | KOTOZUTE#<ISO日時>#<ことづてid> | body, createdAt, color |
-| PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, openIntervalWeeks, timezone, status, cycleStartedAt, previousCycleStartedAt, cycleStarts |
+| PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, openIntervalWeeks, scheduleSetBy, timezone, status, cycleStartedAt, previousCycleStartedAt, cycleStarts |
 | INVITE#<token> | META | inviterUserId, status, ttl |
 | DEVICE#<APNsトークン> | META | userId（この端末の持ち主） |
 
@@ -79,7 +79,8 @@ GSI（2個）:
 - `GET /invites/{token}` — 招待の中身（誰から？）
 - `POST /invites/{token}/accept` — 招待を受けてペア成立
 - `GET /pair` — ペア情報
-- `PATCH /pair` — オープン曜日・時刻・周期（`openIntervalWeeks`：1〜4週）の変更
+- `PATCH /pair` — オープン曜日・時刻・周期（`openIntervalWeeks`：1〜4週）の変更。変えた人を `scheduleSetBy` に残す
+  （ペアを組んだ直後の「ペースを決める」画面で、あとから開いた人に「◯◯が決めたペース」と見せるため）
 - `POST /kotozute` — ことづてを書く（**ペア未成立でも書ける**）。`color` で付箋の色を指定できる
 - `GET /kotozute/this-week` — 今週の状態をまとめて取る（相互ロック内包。下記）
 - `PATCH /kotozute/{id}` — 編集（オープン前・本文のみ。サーバーで可否判定）
