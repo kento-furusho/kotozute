@@ -144,3 +144,15 @@ func TestHandler_InvalidValueReturns400(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, response.StatusCode)
 	}
 }
+
+func TestTouchesSchedule(t *testing.T) {
+	if !touchesSchedule(patchPairRequest{OpenIntervalWeeks: intPtr(2)}) {
+		t.Error("周期の変更はペースを決めたことになる")
+	}
+	if !touchesSchedule(patchPairRequest{OpenTime: strPtr("21:00")}) {
+		t.Error("時刻の変更はペースを決めたことになる")
+	}
+	if touchesSchedule(patchPairRequest{Timezone: strPtr("Asia/Tokyo")}) {
+		t.Error("タイムゾーンだけの変更はペースを決めたことにしない")
+	}
+}
