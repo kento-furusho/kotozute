@@ -110,3 +110,47 @@ func TestErrorResponse(t *testing.T) {
 		t.Errorf("expected error message %q, got %q", "user not registered", body["error"])
 	}
 }
+
+// TestNextOpenMoment は次のオープンの決め方。weekly-open / get-me / get-pair / get-this-week で
+// 同じ表を流し、アプリに出る「次のオープン」と実際に開く日がずれないことを確かめる。
+func TestNextOpenMoment(t *testing.T) {
+	// 2026-08-03 は月曜。オープンは金曜 20:00（日本時間）。
+	now := mustTime(t, "2026-08-03T09:00:00+09:00")
+	tests := []struct {
+		name           string
+		cycleStartedAt string
+		intervalWeeks  int
+		want           string
+	}{
+		{"周期の属性が無い古いペアは毎週", "2026-07-31T11:00:00Z", 0, "2026-08-07T20:00"},
+		{"毎週：前回の金曜の次の金曜", "2026-07-31T11:00:00Z", 1, "2026-08-07T20:00"},
+		{"2週ごと：前回から7日の金曜は見送り、14日の金曜", "2026-07-31T11:00:00Z", 2, "2026-08-14T20:00"},
+		{"4週ごと：28日後の金曜", "2026-07-31T11:00:00Z", 4, "2026-08-28T20:00"},
+		// 前回のオープンが前の曜日（日曜）で、曜日を金曜に変えた直後。
+		// 金曜まで5日 ≥ 3.5日なので、その金曜に開く。
+		{"曜日を変えても前回から十分あいていればすぐの金曜", "2026-08-02T11:00:00Z", 1, "2026-08-07T20:00"},
+		// 前回のオープンが木曜。金曜まで1日 < 3.5日なので、次の金曜に回す。
+		{"前回から短すぎる金曜は見送る", "2026-08-06T11:00:00Z", 1, "2026-08-14T20:00"},
+		{"ペア成立直後（遠い過去）は次の金曜", "1970-01-01T00:00:00Z", 2, "2026-08-07T20:00"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := nextOpenMoment(5, "20:00", "Asia/Tokyo", tt.cycleStartedAt, tt.intervalWeeks, now)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if s := got.Format("2006-01-02T15:04"); s != tt.want {
+				t.Errorf("nextOpenMoment() = %s, want %s", s, tt.want)
+			}
+		})
+	}
+}
+
+func mustTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	v, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("failed to parse %q: %v", s, err)
+	}
+	return v
+}

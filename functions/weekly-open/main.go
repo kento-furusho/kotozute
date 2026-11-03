@@ -65,6 +65,8 @@ type pairMeta struct {
 	PreviousCycleStartedAt string
 	// 区切りの履歴（古い順）。週ごとに遡るために使う。
 	CycleStarts []string
+	// オープンの周期（週）。属性が無ければ毎週（1）。
+	OpenIntervalWeeks int
 }
 
 // handler は EventBridge から定期起動される。API Gateway からは呼ばれないので
@@ -99,8 +101,12 @@ func handler(ctx context.Context) error {
 
 // shouldOpen はペアの timezone で「いまオープンすべきか」を判定する純粋関数。
 // - 今がそのペアのオープン曜日で、オープン時刻を過ぎている
-// - かつ、このサイクルではまだオープンしていない（cycleStartedAt が今回のオープン時刻より前）
-// 二重オープン防止は cycleStartedAt との比較で行うため、バッチが毎時走っても1サイクル1回に収まる。
+// - かつ、前回のオープン（cycleStartedAt）から minOpenGap 以上あいている
+//
+// 2つ目が二重オープン防止と周期の両方を担う。開いた直後は cycleStartedAt が今になるので、
+// 毎時バッチが走っても同じ日にもう一度開くことはない。周期が2週以上なら、間の週は見送る。
+// 以前は「cycleStartedAt が今回のオープン時刻より前か」だけを見ていたため、
+// 曜日を変えた直後に、前回から1日しか経っていないのにもう一度開いていた。
 func shouldOpen(pair pairMeta, now time.Time) bool {
 	loc, err := time.LoadLocation(pair.Timezone)
 	if err != nil {
@@ -121,11 +127,54 @@ func shouldOpen(pair pairMeta, now time.Time) bool {
 		return false // まだ今日のオープン時刻に達していない
 	}
 
-	// 今回のオープン時刻以降に既にオープン済みなら、このサイクルは処理済み。
-	if started, err := time.Parse(time.RFC3339, pair.CycleStartedAt); err == nil && !started.Before(openMoment) {
+	if started, err := time.Parse(time.RFC3339, pair.CycleStartedAt); err == nil && openMoment.Sub(started) < minOpenGap(pair.OpenIntervalWeeks) {
 		return false
 	}
 	return true
+}
+
+// minOpenGap は、前回のオープンから次のオープンまでに空ける最短の間隔。
+// 周期が N 週なら (N − 0.5) 週。毎週なら3.5日、2週ごとなら10.5日。
+//
+// オープンの曜日は毎週めぐってくるので、周期が2週以上のときはこの間隔で振り分ける
+// （2週ごとなら、1週目は7日 < 10.5日で見送り、2週目に14日で開く）。
+//
+// この計算は weekly-open / get-me / get-pair / get-this-week で同じものを使う。
+// 片方だけ変えると、アプリに出る「次のオープン」と実際に開く日がずれる。
+func minOpenGap(intervalWeeks int) time.Duration {
+	if intervalWeeks < 1 {
+		intervalWeeks = 1
+	}
+	return time.Duration(intervalWeeks*7*24-84) * time.Hour
+}
+
+// nextOpenMoment は次のオープン日時を返す純粋関数（get-* と同じもの）。
+// ここでは使わないが、shouldOpen と食い違わないことをテストで確かめるために置く。
+func nextOpenMoment(openDayOfWeek int, openTime, timezone, cycleStartedAt string, intervalWeeks int, now time.Time) (time.Time, error) {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	nowInLoc := now.In(loc)
+
+	hour, minute, err := parseHHMM(openTime)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	daysUntil := (openDayOfWeek - int(nowInLoc.Weekday()) + 7) % 7
+	candidate := time.Date(nowInLoc.Year(), nowInLoc.Month(), nowInLoc.Day(), hour, minute, 0, 0, loc).
+		AddDate(0, 0, daysUntil)
+	if !candidate.After(nowInLoc) {
+		candidate = candidate.AddDate(0, 0, 7)
+	}
+	if started, err := time.Parse(time.RFC3339, cycleStartedAt); err == nil {
+		// 周期は最大4週なので、5回進めれば必ず届く。壊れた値で回り続けないよう上限を置く。
+		for i := 0; i < 5 && candidate.Sub(started) < minOpenGap(intervalWeeks); i++ {
+			candidate = candidate.AddDate(0, 0, 7)
+		}
+	}
+	return candidate, nil
 }
 
 func parseHHMM(s string) (int, int, error) {
@@ -197,6 +246,11 @@ func buildPairMeta(item map[string]types.AttributeValue) pairMeta {
 	if v, ok := item["previousCycleStartedAt"].(*types.AttributeValueMemberS); ok {
 		p.PreviousCycleStartedAt = v.Value
 	}
+	if v, ok := item["openIntervalWeeks"].(*types.AttributeValueMemberN); ok {
+		if n, err := strconv.Atoi(v.Value); err == nil {
+			p.OpenIntervalWeeks = n
+		}
+	}
 	if v, ok := item["cycleStarts"].(*types.AttributeValueMemberL); ok {
 		for _, e := range v.Value {
 			if s, ok := e.(*types.AttributeValueMemberS); ok {
@@ -250,7 +304,7 @@ func openPair(ctx context.Context, pair pairMeta, now time.Time) error {
 // 相手が0枚なら、その人には新しく読めるものが無いので黙っている（気配も出さない方針と揃う）。
 //
 // 相手が1枚以上あるとき、文面は自分が書いたかで分かれる:
-//   - 自分も書いた   → 「今週のことづて、オープンしました」（そのまま読める）
+//   - 自分も書いた   → 「ことづてがオープンしました」（そのまま読める）
 //   - 自分は書いてない → 「あなたが1つ書くと、◯◯のことづても見られます」（催促でなく事実）
 func buildNotifications(pair pairMeta, wroteMember1, wroteMember2 bool, name1, name2 string) []notification {
 	var out []notification
@@ -266,7 +320,7 @@ func buildNotifications(pair pairMeta, wroteMember1, wroteMember2 bool, name1, n
 
 func notificationFor(userID string, wrote bool, partnerName string) notification {
 	if wrote {
-		return notification{UserID: userID, Message: "今週のことづて、オープンしました"}
+		return notification{UserID: userID, Message: "ことづてがオープンしました"}
 	}
 	if partnerName == "" {
 		partnerName = "相手"
