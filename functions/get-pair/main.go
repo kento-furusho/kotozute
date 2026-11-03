@@ -62,10 +62,12 @@ type pairResponse struct {
 	OpenDayOfWeek int         `json:"openDayOfWeek"`
 	OpenTime      string      `json:"openTime"`
 	// オープンの周期（週）。1=毎週、2=2週ごと…。
-	OpenIntervalWeeks int    `json:"openIntervalWeeks"`
-	Timezone          string `json:"timezone"`
-	Status            string `json:"status"`
-	NextOpenAt        string `json:"nextOpenAt"`
+	OpenIntervalWeeks int `json:"openIntervalWeeks"`
+	// オープンのペースを最後に決めた人（ユーザーID）。誰も決めていなければ空。
+	ScheduleSetBy string `json:"scheduleSetBy,omitempty"`
+	Timezone      string `json:"timezone"`
+	Status        string `json:"status"`
+	NextOpenAt    string `json:"nextOpenAt"`
 	// サイクルの区切り（古い順）。週ごとに遡って読むために返す。
 	// 隣り合う2つが1つの週の範囲になる。末尾は「いま書いているサイクル」の開始。
 	CycleStarts []string `json:"cycleStarts"`
@@ -83,6 +85,7 @@ type pairMeta struct {
 	// 前回オープンした時刻と周期。次のオープンを決めるのに要る。
 	CycleStartedAt    string
 	OpenIntervalWeeks int
+	ScheduleSetBy     string
 }
 
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -128,6 +131,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		OpenDayOfWeek:     meta.OpenDayOfWeek,
 		OpenTime:          meta.OpenTime,
 		OpenIntervalWeeks: intervalOrWeekly(meta.OpenIntervalWeeks),
+		ScheduleSetBy:     meta.ScheduleSetBy,
 		Timezone:          meta.Timezone,
 		Status:            meta.Status,
 		NextOpenAt:        nextOpenAt,
@@ -238,6 +242,9 @@ func buildPairMetaFromItem(item map[string]types.AttributeValue) *pairMeta {
 	meta.CycleStarts = sortedUnique(meta.CycleStarts)
 	if v, ok := item["cycleStartedAt"].(*types.AttributeValueMemberS); ok {
 		meta.CycleStartedAt = v.Value
+	}
+	if v, ok := item["scheduleSetBy"].(*types.AttributeValueMemberS); ok {
+		meta.ScheduleSetBy = v.Value
 	}
 	if v, ok := item["openIntervalWeeks"].(*types.AttributeValueMemberN); ok {
 		if n, err := strconv.Atoi(v.Value); err == nil {
