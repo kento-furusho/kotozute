@@ -23,3 +23,6 @@ samconfig.toml
 
 # wrangler dev の作業フォルダ
 .wrangler/
+
+# Python のキャッシュ
+__pycache__/
