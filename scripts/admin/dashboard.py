@@ -8,8 +8,13 @@
   3. 結果を HTML にして、iCloud の外（~/Library/Application Support）に書き出して開く
 
 使い方:
-  python3 scripts/admin/dashboard.py
+  python3 scripts/admin/dashboard.py           # 手元だけのサーバーを立てて開く（画面の「更新する」で取り直せる）
+  python3 scripts/admin/dashboard.py --once    # HTML を1回だけ書き出して開く（サーバーを立てない）
   AWS_PROFILE=xxx python3 scripts/admin/dashboard.py   # プロファイルを変えるとき
+
+サーバーは 127.0.0.1 だけで待ち受け、起動ごとに作るランダムな合言葉を URL に入れる。
+Host ヘッダが 127.0.0.1 / localhost でなければ断る（DNS リバインディング対策）。
+止めるときは Ctrl+C。サーバーで動かすときは HTML をファイルに残さない。
 
 設定は ~/.config/kotozute-admin/config.json（リポジトリには置かない）:
   {
@@ -25,8 +30,10 @@ import base64
 import datetime as dt
 import gzip
 import html
+import http.server
 import json
 import os
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -244,7 +251,7 @@ def weekly_downloads(sales):
     return sorted(weeks.items())
 
 
-def render(stats, feedback, sales, sales_error):
+def render(stats, feedback, sales, sales_error, live=False):
     weekly = stats.get("weekly", [])
     tiles = [
         tile("ユーザー", stats["users"]),
@@ -332,10 +339,16 @@ th {{ color:var(--ink-soft); font-weight:500; font-size:13px; }}
 .feedback .body {{ white-space:pre-wrap; overflow-wrap:anywhere; }}
 code {{ font-size:11px; }}
 .wrap {{ overflow-x:auto; }}
+.head {{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }}
+.refresh {{ font:inherit; font-size:14px; padding:8px 16px; border-radius:999px; border:1px solid var(--line);
+  background:var(--surface); color:var(--ink); cursor:pointer; white-space:nowrap; }}
+.refresh:disabled {{ color:var(--ink-soft); cursor:default; }}
 </style></head>
 <body><main>
+<div class="head"><div>
 <h1>ことづて 管理</h1>
 <div class="muted">{generated} 時点（日本時間）・この Mac だけで作った画面です</div>
+</div>{'<button class="refresh" id="refresh">更新する</button>' if live else ''}</div>
 <div class="tiles">{''.join(tiles)}</div>
 {''.join(sections)}
 </main>
@@ -347,21 +360,26 @@ document.querySelectorAll('.hit').forEach(g => {{
     tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 28) + 'px'; }});
   g.addEventListener('mouseleave', () => {{ tip.style.display = 'none'; }});
 }});
+const refresh = document.getElementById('refresh');
+if (refresh) refresh.addEventListener('click', () => {{
+  refresh.disabled = true; refresh.textContent = '更新中…'; location.reload();
+}});
 </script>
 </body></html>"""
 
 
 # ---------------------------------------------------------------- main
 
-def main():
-    os.makedirs(OUT_DIR, mode=0o700, exist_ok=True)
-    os.chmod(OUT_DIR, 0o700)
+def load_config():
     try:
         with open(CONFIG_PATH) as f:
-            cfg = json.load(f)
+            return json.load(f)
     except FileNotFoundError:
-        cfg = {}
+        return {}
 
+
+def collect(cfg, live):
+    """AWS と App Store Connect から取り直して、画面の HTML を返す。"""
     print("集計を取得しています…", file=sys.stderr)
     stats = invoke("kotozute-admin-stats")
     feedback = invoke("kotozute-admin-feedback")
@@ -373,16 +391,87 @@ def main():
             sales = load_sales(cfg)
         except Exception as e:  # DL 数が取れなくても、残りは見られるようにする
             sales_error = f"DL 数を取得できませんでした（{e}）"
+    return render(stats, feedback, sales, sales_error, live=live)
 
+
+def run_once(cfg):
     out_path = os.path.join(OUT_DIR, "index.html")
     # ご意見の本文が入るので、自分だけが読める権限で書く。
     fd = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
-        f.write(render(stats, feedback, sales, sales_error))
+        f.write(collect(cfg, live=False))
     os.chmod(out_path, 0o600)
     print(out_path)
     if "--no-open" not in sys.argv:
         subprocess.run(["open", out_path])
+
+
+def serve(cfg):
+    # 前に --once で書き出したものがあれば消す（ご意見の本文を手元に残さない）。
+    try:
+        os.remove(os.path.join(OUT_DIR, "index.html"))
+    except FileNotFoundError:
+        pass
+
+    token = secrets.token_urlsafe(16)
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            port = self.server.server_address[1]
+            # ブラウザ以外の名前（悪意のあるドメインを 127.0.0.1 に向けたもの）で来たら断る。
+            if self.headers.get("Host") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+                return self.reply(403, "forbidden")
+            if self.path != f"/{token}/":
+                return self.reply(404, "not found")
+            try:
+                body = collect(cfg, live=True)
+                status = 200
+            except Exception as e:
+                body = f"<!DOCTYPE html><meta charset=utf-8><p>取得できませんでした：{esc(e)}</p>"
+                status = 500
+            self.reply(status, body, "text/html; charset=utf-8")
+
+        def reply(self, status, body, content_type="text/plain; charset=utf-8"):
+            data = body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            # 取り直すたびに最新を出す。ほかのページに埋め込ませない。
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy",
+                             "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):  # URL（合言葉入り）をログに出さない
+            pass
+
+    # 127.0.0.1 だけで待ち受ける。ポートは OS に空いているものを選ばせる。
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    url = f"http://127.0.0.1:{server.server_address[1]}/{token}/"
+    print("管理画面を開きました。止めるときは Ctrl+C。", file=sys.stderr)
+    if "--no-open" not in sys.argv:
+        subprocess.run(["open", url])
+    else:
+        print(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n止めました。", file=sys.stderr)
+    finally:
+        server.server_close()
+
+
+def main():
+    os.makedirs(OUT_DIR, mode=0o700, exist_ok=True)
+    os.chmod(OUT_DIR, 0o700)
+    cfg = load_config()
+    if "--once" in sys.argv:
+        run_once(cfg)
+    else:
+        serve(cfg)
 
 
 if __name__ == "__main__":

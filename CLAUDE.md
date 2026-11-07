@@ -91,8 +91,10 @@ GSI（2個）:
 ### 管理用（API Gateway につながない）
 外から呼べる URL を作らない。`kotozute-admin-stats`（集計）と `kotozute-admin-feedback`（ご意見の一覧）は
 `Events` を持たない Lambda で、この AWS アカウントの IAM 権限でしか呼べない。
-手元の `scripts/admin/dashboard.py` が `aws lambda invoke` で呼び、App Store Connect の DL 数と合わせて
-HTML を `~/Library/Application Support/kotozute-admin/` に書き出して開く（iCloud・リポジトリの外）。
+手元の `scripts/admin/dashboard.py` が `aws lambda invoke` で呼び、App Store Connect の DL 数と合わせて画面にする。
+既定は 127.0.0.1 だけで待ち受ける小さなサーバー（起動ごとのランダムな合言葉を URL に入れ、Host が違えば 403）。
+画面の「更新する」で取り直す。`--once` なら HTML を `~/Library/Application Support/kotozute-admin/` に1回だけ書き出す。
+本番アカウントの掃除は `scripts/admin/delete-users.sh`（delete-me の Lambda を呼ぶ。一覧は ~/.config/kotozute-admin/）。
 - 集計はキー（PK/SK）と `createdAt` だけを Projection で読む。**ことづての本文は Lambda にも渡らない**
 - 権限はどちらも `dynamodb:Scan` のみ。`post-feedback` は `dynamodb:PutItem` のみ
 - ご意見は送った人の下（`USER#<id>`）に置く。アカウント削除で一緒に消える（プライバシーポリシーの約束）
