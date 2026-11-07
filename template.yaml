@@ -533,6 +533,90 @@ Resources:
           DYNAMODB_ENDPOINT: ""
 
   # 週一オープンのバッチ。EventBridge が定期起動する（API Gateway からは呼ばれない）。
+  # ご意見を受け取る。アプリの設定から送られる。
+  # 書き込むだけなので、権限は PutItem に絞る（読む・消すはできない）。
+  PostFeedbackFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/post-feedback/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt KotozuteTable.Arn
+      Events:
+        PostFeedback:
+          Type: Api
+          Properties:
+            Path: /feedback
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  # ---- 管理用（自分だけが呼ぶ） -------------------------------------------
+  # どちらも Events を持たせない。API Gateway のルートが無いので、外から呼べる URL は存在しない。
+  # 呼べるのは、このアカウントで lambda:InvokeFunction を持つ IAM だけ
+  # （手元の scripts/admin/dashboard.py が aws lambda invoke で呼ぶ）。
+  # 関数名を固定しておくのは、手元のスクリプトから名前で呼ぶため。
+  # 権限は Scan だけ。書き換え・削除はできない。
+
+  # 集計（ユーザー数・ペア数・ことづて数など）。本文は読まない（Projection でキーと日時だけ）。
+  AdminStatsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      FunctionName: kotozute-admin-stats
+      CodeUri: functions/admin-stats/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      # テーブル全体を Scan するので API 関数より長めに。
+      Timeout: 30
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+              Resource: !GetAtt KotozuteTable.Arn
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
+  # ご意見の一覧。
+  AdminFeedbackFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      FunctionName: kotozute-admin-feedback
+      CodeUri: functions/admin-feedback/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Timeout: 30
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+              Resource: !GetAtt KotozuteTable.Arn
+      Environment:
+        Variables:
+          DYNAMODB_ENDPOINT: ""
+
   WeeklyOpenFunction:
     Type: AWS::Serverless::Function
     Metadata:

@@ -94,8 +94,13 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		}
 	}
 
-	if err := deleteKotozute(ctx, userID); err != nil {
+	if err := deleteByPrefix(ctx, userID, "KOTOZUTE#"); err != nil {
 		return errorResponse(http.StatusInternalServerError, "failed to delete kotozute"), nil
+	}
+	// ご意見も本人の下にあるので一緒に消す。プライバシーポリシーで
+	// 「アカウントの削除で消える」と約束している範囲に入れている。
+	if err := deleteByPrefix(ctx, userID, "FEEDBACK#"); err != nil {
+		return errorResponse(http.StatusInternalServerError, "failed to delete feedback"), nil
 	}
 
 	// 端末の登録も落とす。残すと消えたユーザー宛に配信を試み続けることになる。
@@ -209,7 +214,7 @@ func partnerUserID(item map[string]types.AttributeValue, userID string) string {
 //
 // 何枚あるか分からないので、引きながら 25 件ずつ消す。
 // 本文は要らないのでキーだけ取る。
-func deleteKotozute(ctx context.Context, userID string) error {
+func deleteByPrefix(ctx context.Context, userID, prefix string) error {
 	var startKey map[string]types.AttributeValue
 	for {
 		out, err := dynamoClient.Query(ctx, &dynamodb.QueryInput{
@@ -217,7 +222,7 @@ func deleteKotozute(ctx context.Context, userID string) error {
 			KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),
 			ExpressionAttributeValues: map[string]types.AttributeValue{
 				":pk":     &types.AttributeValueMemberS{Value: userPK(userID)},
-				":prefix": &types.AttributeValueMemberS{Value: "KOTOZUTE#"},
+				":prefix": &types.AttributeValueMemberS{Value: prefix},
 			},
 			ProjectionExpression: aws.String("PK, SK"),
 			ExclusiveStartKey:    startKey,

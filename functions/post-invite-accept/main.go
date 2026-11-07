@@ -231,6 +231,9 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 						"openTime":      &types.AttributeValueMemberS{Value: defaultOpenTime},
 						"timezone":      &types.AttributeValueMemberS{Value: defaultTimezone},
 						"status":        &types.AttributeValueMemberS{Value: "active"},
+						// ペアが成立した日時。cycleStartedAt は遠い過去で初期化するので、
+						// 成立日はこちらに残す（管理用の集計で使う）。
+						"createdAt": &types.AttributeValueMemberS{Value: now.UTC().Format(time.RFC3339)},
 						// サイクルの区切りは2つ。成立時は両方を同じ値にして、
 						// 読むサイクルを空（＝まだ何もオープンされていない）から始める。
 						"cycleStartedAt":         &types.AttributeValueMemberS{Value: cycleStart},

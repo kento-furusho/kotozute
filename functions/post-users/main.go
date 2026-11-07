@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -103,6 +104,8 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		"SK":          &types.AttributeValueMemberS{Value: "META"},
 		"displayName": &types.AttributeValueMemberS{Value: req.DisplayName},
 		"email":       &types.AttributeValueMemberS{Value: req.Email},
+		// 登録した日時。管理用の集計で「いつ何人増えたか」を数えるのに使う。
+		"createdAt": &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
 	}
 
 	_, err := dynamoClient.PutItem(ctx, &dynamodb.PutItemInput{
