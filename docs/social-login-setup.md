@@ -104,8 +104,11 @@ Cognito は Web の流れで Apple にログインするので、App ID とは�
 - Google の **クライアント ID**（`….apps.googleusercontent.com`）
 - 鍵とシークレットを上の場所に置いたこと
 
-秘密の値（Apple の .p8、Google のシークレット）は、AWS Secrets Manager に入れる。
-入れるためのスクリプトは Claude が用意し、**実行は自分で行う**（Claude は中身を見ない）。
+秘密の値（Apple の .p8、Google のシークレット）は、AWS Secrets Manager の `kotozute/social-login` に入れる。
+**実行は自分で行う**（Claude は中身を見ない）。片方ずつ入れてよい（無いほうは前の値を残す）:
+```bash
+~/Developer/kotozute/scripts/admin/put-social-login-secrets.sh
+```
 CloudFormation は `{{resolve:secretsmanager:...}}` でそこから読むので、`template.yaml` や
 `samconfig.toml` にも秘密は入らない。
 
