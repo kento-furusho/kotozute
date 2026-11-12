@@ -44,6 +44,22 @@ func userIDFromRequest(request events.APIGatewayProxyRequest) (string, bool) {
 	return sub, true
 }
 
+// cognitoUsername は Cognito のユーザー名を返す。AdminDeleteUser に渡す。
+//
+// メール登録のユーザーは username と sub が同じなので sub で消せるが、
+// Apple / Google だけで登録したユーザーの username は "google_…" のような別の値で、
+// sub では消せない。ID トークンの cognito:username を優先する。
+func cognitoUsername(request events.APIGatewayProxyRequest, fallback string) string {
+	claims, ok := request.RequestContext.Authorizer["claims"].(map[string]interface{})
+	if !ok {
+		return fallback
+	}
+	if name, ok := claims["cognito:username"].(string); ok && name != "" {
+		return name
+	}
+	return fallback
+}
+
 func init() {
 	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
@@ -146,7 +162,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	if userPoolID != "" {
 		if _, err := cognitoClient.AdminDeleteUser(ctx, &cognito.AdminDeleteUserInput{
 			UserPoolId: aws.String(userPoolID),
-			Username:   aws.String(userID),
+			Username:   aws.String(cognitoUsername(request, userID)),
 		}); err != nil {
 			log.Printf("failed to delete cognito user %s: %v", userID, err)
 			return errorResponse(http.StatusInternalServerError, "failed to delete account"), nil

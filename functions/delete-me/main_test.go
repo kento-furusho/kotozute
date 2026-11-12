@@ -78,3 +78,20 @@ func TestStringAttr(t *testing.T) {
 		t.Errorf("無い項目は空: got %q", got)
 	}
 }
+
+func TestCognitoUsername(t *testing.T) {
+	req := func(claims map[string]interface{}) events.APIGatewayProxyRequest {
+		return events.APIGatewayProxyRequest{RequestContext: events.APIGatewayProxyRequestContext{
+			Authorizer: map[string]interface{}{"claims": claims},
+		}}
+	}
+	if got := cognitoUsername(req(map[string]interface{}{"sub": "s1", "cognito:username": "google_123"}), "s1"); got != "google_123" {
+		t.Errorf("外部ユーザーは cognito:username を使う: got %q", got)
+	}
+	if got := cognitoUsername(req(map[string]interface{}{"sub": "s1"}), "s1"); got != "s1" {
+		t.Errorf("無ければ sub: got %q", got)
+	}
+	if got := cognitoUsername(events.APIGatewayProxyRequest{}, "s1"); got != "s1" {
+		t.Errorf("claims が無ければ sub: got %q", got)
+	}
+}

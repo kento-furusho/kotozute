@@ -88,6 +88,17 @@ GSI（2個）:
 - `GET /kotozute/archive` — アーカイブ（カーソルページング）
 - `POST /feedback` — ご意見を送る（`body` 必須・2000字まで、`appVersion` 任意）。204 を返す
 
+### Apple / Google ログイン（Cognito の連携）
+メール＋パスワードに加えて、Apple と Google でも入れる。準備（Apple・Google の管理画面）は `docs/social-login-setup.md`。
+- アプリは Web シート（`ASWebAuthenticationSession`）で `https://kotozute.auth.ap-northeast-1.amazoncognito.com/oauth2/authorize?identity_provider=SignInWithApple|Google`
+  に直行し、`kotozute://auth/callback` で受けた認可コードを `/oauth2/token` で交換する（PKCE）。返るトークンはメール登録と同じ形で、API はそのまま
+- **同じメールは1つのアカウントにまとめる。** 登録前トリガー（`functions/pre-signup`）が、確認済みのメールで
+  確認済みのメール登録ユーザーを探し、`AdminLinkProviderForUser` で紐づける。**確認されていないメールでは紐づけない**（乗っ取り防止）。
+  Cognito の仕様で、紐づけた直後の1回だけログインが失敗として返る。アプリはもう一度押してもらう
+- 外部だけで登録したユーザーの Cognito username は `google_…` のような値で sub と違う。消すときは ID トークンの `cognito:username` を使う（delete-me）
+- 秘密（Apple の .p8、Google のシークレット）は Secrets Manager の `kotozute/social-login`。テンプレートは `{{resolve:…}}` で読むだけ
+- 名前・写真は求めない（スコープは email / openid のみ）。表示名はアプリで本人が決める
+
 ### 管理用（API Gateway につながない）
 外から呼べる URL を作らない。`kotozute-admin-stats`（集計）と `kotozute-admin-feedback`（ご意見の一覧）は
 `Events` を持たない Lambda で、この AWS アカウントの IAM 権限でしか呼べない。
