@@ -96,6 +96,11 @@ GSI（2個）:
   確認済みのメール登録ユーザーを探し、`AdminLinkProviderForUser` で紐づける。**確認されていないメールでは紐づけない**（乗っ取り防止）。
   Cognito の仕様で、紐づけた直後の1回だけログインが失敗として返る。アプリはもう一度押してもらう
 - 外部だけで登録したユーザーの Cognito username は `google_…` のような値で sub と違う。消すときは ID トークンの `cognito:username` を使う（delete-me）
+- **Apple の連携はアカウント削除で取り消す**（ガイドライン 5.1.1(v)）。Apple のトークンは Cognito の中にしか無いので、
+  `DELETE /me` は Apple が紐づいた人（`AdminGetUser` の identities で判定）に **何も消さず 409 `apple_reauth_required`** を返す。
+  アプリはその場で Apple の本人確認（ASAuthorization）を出し、`{"appleAuthorizationCode": …}` を付けて呼び直す。
+  サーバーはバンドル ID `dev.kotozute.app` 宛ての code を `/auth/token` で引き換えて `/auth/revoke`。失敗しても削除は止めない。
+  本人確認ができない（キャンセル以外の失敗）ときは `{"skipAppleRevoke": true}` で取り消しなしに消す。管理用の delete-users.sh もこちら
 - 秘密（Apple の .p8、Google のシークレット）は Secrets Manager の `kotozute/social-login`。テンプレートは `{{resolve:…}}` で読むだけ
 - 名前・写真は求めない（スコープは email / openid のみ）。表示名はアプリで本人が決める
 
