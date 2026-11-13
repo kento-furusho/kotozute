@@ -411,7 +411,17 @@ Resources:
               Effect: Allow
               Action:
                 - cognito-idp:AdminDeleteUser
+                # Apple の連携があるかを見る（あれば消す前に Apple 側も取り消す）
+                - cognito-idp:AdminGetUser
               Resource: !GetAtt KotozuteUserPool.Arn
+        # Apple の連携の取り消し（ガイドライン 5.1.1(v)）に、Cognito の Apple 連携と同じ鍵を使う。
+        # 読めるのはこのシークレットだけ。末尾の -?????? は Secrets Manager が付ける6文字。
+        - Statement:
+            - Sid: AllowReadAppleKey
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:kotozute/social-login-??????"
         # 端末の登録も落とす。残すと消えたユーザー宛に配信を試み続ける。
         - Statement:
             - Sid: AllowDeleteSNSEndpoint
