@@ -1,10 +1,10 @@
 /* ことづての法務ページ。アプリの見た目に合わせた最小限の体裁。 */
 :root {
-  --bg: #f7f2e9;
-  --ink: #3a322c;
-  --ink-soft: #8a7b6c;
-  --accent: #e4573d;
-  --line: #e7ddcd;
+  --bg: #fffcf8;
+  --ink: #2a2522;
+  --ink-soft: #756d66;
+  --accent: #ef6420;
+  --line: #f1e7dc;
 }
 * { box-sizing: border-box; }
 body {
