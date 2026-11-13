@@ -71,7 +71,9 @@ trap 'rm -rf "$tmp"' EXIT
 failed=0
 for t in "${targets[@]}"; do
   sub="${t%%|*}"; email="${t#*|}"
-  payload=$(printf '{"requestContext":{"authorizer":{"claims":{"sub":"%s"}}}}' "$sub")
+  # skipAppleRevoke: Apple の連携の取り消しには本人の Apple ログインが要り、ここからはできない。
+  # 付けないと Apple で入った人は 409 で止まる（アプリには本人確認を頼む合図）。
+  payload=$(printf '{"requestContext":{"authorizer":{"claims":{"sub":"%s"}}},"body":"{\\"skipAppleRevoke\\":true}"}' "$sub")
   aws lambda invoke --function-name "$fn" --cli-binary-format raw-in-base64-out \
     --payload "$payload" "$tmp/out.json" >/dev/null
   status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("statusCode"))' "$tmp/out.json")

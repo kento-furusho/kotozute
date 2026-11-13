@@ -118,6 +118,9 @@ Resources:
           <p style="font-size:24px; font-weight:bold; letter-spacing:4px;">{####}</p>
           <p>アプリの画面に入力してください。</p>
           <p style="color:#8A7B6C; font-size:13px;">心当たりがない場合は、このメールを破棄してください。</p>
+      # Apple / Google で初めて入った人を、同じメールの既存アカウントに紐づける（functions/pre-signup）。
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignUpFunction.Arn
       # パスワードの最低条件。学習段階なので緩め（8文字以上・小文字・数字）にしておく。
       Policies:
         PasswordPolicy:
@@ -141,6 +144,97 @@ Resources:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
+      # Apple / Google ログイン。アプリは Web シートで /oauth2/authorize?identity_provider=… に直行し、
+      # 認可コードを kotozute://auth/callback で受け取って /oauth2/token で交換する（PKCE 付き）。
+      # 返るトークンはメール登録と同じ形なので、API 側の Authorizer はそのまま。
+      SupportedIdentityProviders:
+        - COGNITO
+        - !Ref AppleIdentityProvider
+        - !Ref GoogleIdentityProvider
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+      CallbackURLs:
+        - kotozute://auth/callback
+      LogoutURLs:
+        - kotozute://auth/signout
+
+  # Cognito のログイン用ドメイン。Apple / Google から結果を受け取る先
+  # （https://kotozute.auth.ap-northeast-1.amazoncognito.com/oauth2/idpresponse）になる。
+  # Apple の Services ID と Google の OAuth クライアントにこの URL を登録してある（docs/social-login-setup.md）。
+  KotozuteUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: kotozute
+      UserPoolId: !Ref KotozuteUserPool
+
+  # 秘密の値（Apple の鍵、Google のシークレット）は Secrets Manager の kotozute/social-login に置き、
+  # ここでは resolve で参照するだけ。テンプレートにも samconfig.toml にも秘密は書かない。
+  # 入れ方は scripts/admin/put-social-login-secrets.sh。
+  AppleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      UserPoolId: !Ref KotozuteUserPool
+      ProviderName: SignInWithApple
+      ProviderType: SignInWithApple
+      ProviderDetails:
+        client_id: dev.kotozute.app.signin
+        team_id: 5V6S74G5N9
+        key_id: "{{resolve:secretsmanager:kotozute/social-login:SecretString:appleKeyId}}"
+        private_key: "{{resolve:secretsmanager:kotozute/social-login:SecretString:applePrivateKey}}"
+        # 名前は使わないので求めない（表示名はアプリで本人が決める）。
+        authorize_scopes: email
+      # email_verified は pre-signup が「紐づけてよいか」の判定に使う。
+      AttributeMapping:
+        email: email
+        email_verified: email_verified
+
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      UserPoolId: !Ref KotozuteUserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: "{{resolve:secretsmanager:kotozute/social-login:SecretString:googleClientId}}"
+        client_secret: "{{resolve:secretsmanager:kotozute/social-login:SecretString:googleClientSecret}}"
+        # profile（名前・写真）は使わないので求めない。
+        authorize_scopes: openid email
+      AttributeMapping:
+        email: email
+        email_verified: email_verified
+
+  # 登録の前のトリガー。外部ログインを、同じメールの確認済みアカウントに紐づける。
+  # Resource をユーザープールの ARN に絞れないのは、プール側がこの関数を参照していて
+  # 互いに参照し合う（循環）になるため。アカウントとリージョンまでは絞る。
+  PreSignUpFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: functions/pre-signup/
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - arm64
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:ListUsers
+                - cognito-idp:AdminLinkProviderForUser
+              Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
+
+  PreSignUpPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PreSignUpFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt KotozuteUserPool.Arn
 
   PostKotozuteFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -317,7 +411,17 @@ Resources:
               Effect: Allow
               Action:
                 - cognito-idp:AdminDeleteUser
+                # Apple の連携があるかを見る（あれば消す前に Apple 側も取り消す）
+                - cognito-idp:AdminGetUser
               Resource: !GetAtt KotozuteUserPool.Arn
+        # Apple の連携の取り消し（ガイドライン 5.1.1(v)）に、Cognito の Apple 連携と同じ鍵を使う。
+        # 読めるのはこのシークレットだけ。末尾の -?????? は Secrets Manager が付ける6文字。
+        - Statement:
+            - Sid: AllowReadAppleKey
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:kotozute/social-login-??????"
         # 端末の登録も落とす。残すと消えたユーザー宛に配信を試み続ける。
         - Statement:
             - Sid: AllowDeleteSNSEndpoint
@@ -660,6 +764,9 @@ Outputs:
   UserPoolClientId:
     Description: "Cognito User Pool Client ID (iOS)"
     Value: !Ref KotozuteUserPoolClient
+  UserPoolDomain:
+    Description: "Apple / Google ログインの入口（アプリの Config.authDomain）"
+    Value: !Sub "${KotozuteUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"
 
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM

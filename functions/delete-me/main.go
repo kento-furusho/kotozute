@@ -18,6 +18,7 @@ import (
 	cognito "github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 )
 
@@ -29,6 +30,7 @@ const batchWriteLimit = 25
 var dynamoClient *dynamodb.Client
 var cognitoClient *cognito.Client
 var snsClient *sns.Client
+var secretsClient *secretsmanager.Client
 var userPoolID string
 
 // userIDFromRequest はAPI Gatewayが検証済みのCognitoトークンから、ユーザーの一意なID（sub）を取り出す。
@@ -42,6 +44,22 @@ func userIDFromRequest(request events.APIGatewayProxyRequest) (string, bool) {
 		return "", false
 	}
 	return sub, true
+}
+
+// cognitoUsername は Cognito のユーザー名を返す。AdminDeleteUser に渡す。
+//
+// メール登録のユーザーは username と sub が同じなので sub で消せるが、
+// Apple / Google だけで登録したユーザーの username は "google_…" のような別の値で、
+// sub では消せない。ID トークンの cognito:username を優先する。
+func cognitoUsername(request events.APIGatewayProxyRequest, fallback string) string {
+	claims, ok := request.RequestContext.Authorizer["claims"].(map[string]interface{})
+	if !ok {
+		return fallback
+	}
+	if name, ok := claims["cognito:username"].(string); ok && name != "" {
+		return name
+	}
+	return fallback
 }
 
 func init() {
@@ -58,6 +76,7 @@ func init() {
 	})
 	cognitoClient = cognito.NewFromConfig(cfg)
 	snsClient = sns.NewFromConfig(cfg)
+	secretsClient = secretsmanager.NewFromConfig(cfg)
 	userPoolID = os.Getenv("USER_POOL_ID")
 }
 
@@ -79,6 +98,31 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	userID, ok := userIDFromRequest(request)
 	if !ok {
 		return errorResponse(http.StatusUnauthorized, "unauthorized"), nil
+	}
+
+	var body deleteRequest
+	if request.Body != "" {
+		if err := json.Unmarshal([]byte(request.Body), &body); err != nil {
+			return errorResponse(http.StatusBadRequest, "invalid body"), nil
+		}
+	}
+
+	// Apple でログインできる人は、消す前に Apple の連携も取り消す（ガイドライン 5.1.1(v)）。
+	// 取り消しに要る code はアプリでしか取れないので、無ければ何も消さずに 409 で頼む。
+	// アプリは Apple の本人確認を出し、code を付けて呼び直す。
+	username := cognitoUsername(request, userID)
+	if body.AppleAuthorizationCode != "" {
+		// 失敗しても削除は止めない。消したい人を Apple 側の都合で引き止めない。
+		if err := revokeApple(ctx, body.AppleAuthorizationCode); err != nil {
+			log.Printf("failed to revoke apple token for user %s: %v", userID, err)
+		}
+	} else if !body.SkipAppleRevoke {
+		linked, err := appleLinked(ctx, username)
+		if err != nil {
+			log.Printf("failed to check apple link for user %s: %v", userID, err)
+		} else if linked {
+			return errorResponse(http.StatusConflict, appleReauthRequired), nil
+		}
 	}
 
 	meta, err := getUserMeta(ctx, userID)
@@ -146,7 +190,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	if userPoolID != "" {
 		if _, err := cognitoClient.AdminDeleteUser(ctx, &cognito.AdminDeleteUserInput{
 			UserPoolId: aws.String(userPoolID),
-			Username:   aws.String(userID),
+			Username:   aws.String(username),
 		}); err != nil {
 			log.Printf("failed to delete cognito user %s: %v", userID, err)
 			return errorResponse(http.StatusInternalServerError, "failed to delete account"), nil
@@ -154,6 +198,17 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	return events.APIGatewayProxyResponse{StatusCode: http.StatusNoContent}, nil
+}
+
+// appleReauthRequired は「Apple の本人確認をしてから呼び直して」の合図。アプリはこの文字列で見分ける。
+const appleReauthRequired = "apple_reauth_required"
+
+// deleteRequest は DELETE /me の本文（省略可）。
+type deleteRequest struct {
+	// アプリの Apple ログインで得た使い捨ての code。連携の取り消しに使う。
+	AppleAuthorizationCode string `json:"appleAuthorizationCode,omitempty"`
+	// Apple の本人確認ができなかったとき（Apple ID に入れない等）に、取り消しなしで消す。
+	SkipAppleRevoke bool `json:"skipAppleRevoke,omitempty"`
 }
 
 // dissolvePair はペアを解消する。相手の pairId を外し、PAIR の META を消す。
