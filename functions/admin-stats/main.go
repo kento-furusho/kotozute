@@ -52,6 +52,11 @@ type row struct {
 	PK        string
 	SK        string
 	CreatedAt string
+	// 招待（INVITE#）とユーザー（USER# META）の行だけが持つ。
+	InviterUserID string
+	Status        string
+	OpenedAt      string
+	PairID        string
 }
 
 type weekStats struct {
@@ -75,7 +80,38 @@ type stats struct {
 	UsersWithoutCreatedAt int         `json:"usersWithoutCreatedAt"`
 	PairsWithoutCreatedAt int         `json:"pairsWithoutCreatedAt"`
 	Weekly                []weekStats `json:"weekly"`
+	// 登録からペア成立までの、どこで止まっているか。
+	Funnel      funnel       `json:"funnel"`
+	RecentUsers []recentUser `json:"recentUsers"`
 }
+
+// funnel は、作成日時を持つユーザー（2026-11 以降の登録）を段階ごとに数える。
+//
+// 「自分から始めた人」だけの流れ。招待を受けて来た人は自分では招待を作らないので、
+// 混ぜると「招待した」の割合が下がって見える。そちらは JoinedByInvite に分けて数える。
+type funnel struct {
+	Started      int `json:"started"`      // 自分から登録した
+	Wrote        int `json:"wrote"`        // 1枚以上書いた
+	Invited      int `json:"invited"`      // 招待を作った
+	InviteOpened int `json:"inviteOpened"` // 相手が招待を開いた（2026-11-25 から記録）
+	Paired       int `json:"paired"`       // ペアになった
+	// 誰かの招待を受けて登録した人。
+	JoinedByInvite int `json:"joinedByInvite"`
+}
+
+// recentUser は最近の新規ユーザー1人ぶん。誰かは分からないよう、ID も名前も返さない。
+type recentUser struct {
+	RegisteredAt   string `json:"registeredAt"`
+	Kotozute       int    `json:"kotozute"`
+	Invites        int    `json:"invites"`        // 作った招待の数
+	FirstInviteAt  string `json:"firstInviteAt"`  // 最初に招待を作った時刻
+	InviteOpenedAt string `json:"inviteOpenedAt"` // 相手が最初に開いた時刻
+	Paired         bool   `json:"paired"`
+	JoinedByInvite bool   `json:"joinedByInvite"`
+}
+
+// 管理画面に並べる新規ユーザーの数。
+const recentUsersToReport = 15
 
 func handler(ctx context.Context) (stats, error) {
 	rows, err := scanKeys(ctx)
@@ -92,9 +128,11 @@ func scanKeys(ctx context.Context) ([]row, error) {
 	var startKey map[string]types.AttributeValue
 	for {
 		out, err := dynamoClient.Scan(ctx, &dynamodb.ScanInput{
-			TableName:            aws.String(tableName),
-			ProjectionExpression: aws.String("PK, SK, createdAt"),
-			ExclusiveStartKey:    startKey,
+			TableName: aws.String(tableName),
+			// 本文（body）は読まない。招待の状態とユーザーの pairId は段階の判定に使う。
+			ProjectionExpression:     aws.String("PK, SK, createdAt, inviterUserId, #status, openedAt, pairId"),
+			ExpressionAttributeNames: map[string]string{"#status": "status"},
+			ExclusiveStartKey:        startKey,
 		})
 		if err != nil {
 			return nil, err
@@ -104,6 +142,11 @@ func scanKeys(ctx context.Context) ([]row, error) {
 				PK:        stringAttr(item, "PK"),
 				SK:        stringAttr(item, "SK"),
 				CreatedAt: stringAttr(item, "createdAt"),
+
+				InviterUserID: stringAttr(item, "inviterUserId"),
+				Status:        stringAttr(item, "status"),
+				OpenedAt:      stringAttr(item, "openedAt"),
+				PairID:        stringAttr(item, "pairId"),
 			})
 		}
 		if len(out.LastEvaluatedKey) == 0 {
@@ -203,7 +246,99 @@ func aggregate(rows []row, now time.Time) stats {
 	for _, key := range order {
 		s.Weekly = append(s.Weekly, *weeks[key])
 	}
+	s.Funnel, s.RecentUsers = funnelOf(rows)
 	return s
+}
+
+// funnelOf は、ユーザーごとに「書いた→招待した→開かれた→ペアになった」のどこまで進んだかを数える。
+//
+// 招待は期限が切れても消していない（テーブルの TTL は無効）ので、過去の招待もここで数えられる。
+// TTL を有効にすると古い招待が消え、この集計が欠ける。
+func funnelOf(rows []row) (funnel, []recentUser) {
+	type userState struct {
+		createdAt      string
+		paired         bool
+		kotozute       int
+		invites        int
+		firstInviteAt  string
+		inviteOpenedAt string
+		ownInviteUsed  bool // 自分の招待が受けられた
+	}
+	users := map[string]*userState{}
+	get := func(id string) *userState {
+		if users[id] == nil {
+			users[id] = &userState{}
+		}
+		return users[id]
+	}
+	earliest := func(a, b string) string {
+		if a == "" || (b != "" && b < a) {
+			return b
+		}
+		return a
+	}
+
+	for _, r := range rows {
+		switch {
+		case strings.HasPrefix(r.PK, "USER#") && r.SK == "META":
+			u := get(strings.TrimPrefix(r.PK, "USER#"))
+			u.createdAt = r.CreatedAt
+			u.paired = r.PairID != ""
+		case strings.HasPrefix(r.PK, "USER#") && strings.HasPrefix(r.SK, "KOTOZUTE#"):
+			get(strings.TrimPrefix(r.PK, "USER#")).kotozute++
+		case strings.HasPrefix(r.PK, "INVITE#") && r.SK == "META" && r.InviterUserID != "":
+			u := get(r.InviterUserID)
+			u.invites++
+			u.firstInviteAt = earliest(u.firstInviteAt, r.CreatedAt)
+			u.inviteOpenedAt = earliest(u.inviteOpenedAt, r.OpenedAt)
+			if r.Status == "accepted" {
+				u.ownInviteUsed = true
+			}
+		}
+	}
+
+	var f funnel
+	var recent []recentUser
+	for _, u := range users {
+		// META の無い ID（消えたユーザーの招待など）と、作成日時の無い古いユーザーは数えない。
+		if u.createdAt == "" {
+			continue
+		}
+		// ペアになっていて、自分の招待が使われていない人は、相手の招待で来た人。
+		joinedByInvite := u.paired && !u.ownInviteUsed
+		recent = append(recent, recentUser{
+			RegisteredAt:   u.createdAt,
+			Kotozute:       u.kotozute,
+			Invites:        u.invites,
+			FirstInviteAt:  u.firstInviteAt,
+			InviteOpenedAt: u.inviteOpenedAt,
+			Paired:         u.paired,
+			JoinedByInvite: joinedByInvite,
+		})
+		if joinedByInvite {
+			f.JoinedByInvite++
+			continue
+		}
+		f.Started++
+		if u.kotozute > 0 {
+			f.Wrote++
+		}
+		if u.invites > 0 {
+			f.Invited++
+		}
+		if u.inviteOpenedAt != "" {
+			f.InviteOpened++
+		}
+		if u.paired {
+			f.Paired++
+		}
+	}
+
+	sort.Slice(recent, func(i, j int) bool { return recent[i].RegisteredAt > recent[j].RegisteredAt })
+	if len(recent) > recentUsersToReport {
+		recent = recent[:recentUsersToReport]
+	}
+	return f, recent
 }
 
 func stringAttr(item map[string]types.AttributeValue, name string) string {

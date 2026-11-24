@@ -594,6 +594,12 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: kotozute
+        # 招待が開かれた時刻（openedAt）を残すため。書けるのは UpdateItem だけ。
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource: !GetAtt KotozuteTable.Arn
       Events:
         GetInvite:
           Type: Api

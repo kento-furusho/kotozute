@@ -251,6 +251,60 @@ def weekly_downloads(sales):
     return sorted(weeks.items())
 
 
+def funnel_section(stats):
+    """登録からペア成立まで、どこで止まっているか。
+    段階ごとの人数（横棒）と、最近の新規ユーザーの一覧。誰かは分からない形で出す。"""
+    f = stats.get("funnel")
+    if not f:
+        return '<section><h2>登録からペアまで</h2><p class="muted">集計の Lambda が古いままです（デプロイ前）。</p></section>'
+    steps = [
+        ("登録した", f["started"]),
+        ("1枚書いた", f["wrote"]),
+        ("招待を作った", f["invited"]),
+        ("相手が招待を開いた", f["inviteOpened"]),
+        ("ペアになった", f["paired"]),
+    ]
+    base = f["started"] or 1
+    bars = "".join(
+        f'<div class="step"><div class="step-label">{esc(label)}</div>'
+        f'<div class="step-track"><div class="step-bar" style="width:{100 * n / base:.0f}%"></div></div>'
+        f'<div class="step-value">{n}人<span class="muted">（{100 * n / base:.0f}%）</span></div></div>'
+        for label, n in steps
+    )
+
+    def when(iso):
+        return fmt_jst(iso) if iso else '<span class="muted">—</span>'
+
+    def stage(u):
+        if u["joinedByInvite"]:
+            return "招待で参加"
+        if u["paired"]:
+            return "ペア成立"
+        if u["inviteOpenedAt"]:
+            return "相手が開いた"
+        if u["invites"]:
+            return "招待の返事待ち"
+        if u["kotozute"]:
+            return "書いた"
+        return "登録のみ"
+
+    rows = "".join(
+        f'<tr><td>{fmt_jst(u["registeredAt"])}</td><td>{u["kotozute"]}</td><td>{u["invites"]}</td>'
+        f'<td>{when(u["firstInviteAt"])}</td><td>{when(u["inviteOpenedAt"])}</td><td>{esc(stage(u))}</td></tr>'
+        for u in stats.get("recentUsers", [])
+    )
+    return (
+        '<section><h2>登録からペアまで</h2>'
+        f'<div class="funnel">{bars}</div>'
+        f'<p class="muted">2026-11 以降に自分から登録した人。招待で参加した人（{f["joinedByInvite"]}人）は含みません。'
+        '「相手が招待を開いた」は 2026-11-25 から記録しています（それより前に開かれた分は数えられません）。'
+        '社内・審査用のアカウントも含みます。</p>'
+        '<h2 style="margin-top:20px">最近の新規ユーザー</h2>'
+        '<table><thead><tr><th>登録</th><th>ことづて</th><th>招待</th><th>最初の招待</th><th>相手が開いた</th><th>いまの段階</th></tr></thead>'
+        f'<tbody>{rows}</tbody></table></section>'
+    )
+
+
 def render(stats, feedback, sales, sales_error, live=False):
     weekly = stats.get("weekly", [])
     tiles = [
@@ -285,6 +339,8 @@ def render(stats, feedback, sales, sales_error, live=False):
         missing = (f'<p class="muted">登録日時を持たない古いデータ（ユーザー {stats["usersWithoutCreatedAt"]}・'
                    f'ペア {stats["pairsWithoutCreatedAt"]}）は、新規の列に入りません。</p>')
     sections.append(f'<section><h2>週ごとの表</h2><table><thead><tr><th>週（月曜〜）</th><th>ことづて</th><th>新規ユーザー</th><th>新規ペア</th><th>ご意見</th></tr></thead><tbody>{rows}</tbody></table>{missing}</section>')
+
+    sections.append(funnel_section(stats))
 
     items = feedback.get("items", [])
     if items:
@@ -332,6 +388,11 @@ table {{ width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums
 th, td {{ text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); }}
 th:first-child, td:first-child {{ text-align:left; }}
 th {{ color:var(--ink-soft); font-weight:500; font-size:13px; }}
+.funnel {{ display:grid; gap:8px; }}
+.step {{ display:grid; grid-template-columns:9em 1fr 7em; gap:10px; align-items:center; font-size:14px; }}
+.step-track {{ height:14px; background:var(--line); border-radius:4px; overflow:hidden; }}
+.step-bar {{ height:100%; background:var(--bar); border-radius:0 4px 4px 0; }}
+.step-value {{ text-align:right; font-variant-numeric:tabular-nums; }}
 .feedback {{ list-style:none; margin:0; padding:0; }}
 .feedback li {{ padding:12px 0; border-bottom:1px solid var(--line); }}
 .feedback li:last-child {{ border-bottom:none; }}

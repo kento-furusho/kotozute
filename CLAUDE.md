@@ -41,7 +41,7 @@
 | USER#<id> | META | email, displayName, apnsToken, pairId |
 | USER#<id> | KOTOZUTE#<ISO日時>#<ことづてid> | body, createdAt, color |
 | PAIR#<id> | META | member1, member2, openDayOfWeek, openTime, openIntervalWeeks, scheduleSetBy, timezone, status, cycleStartedAt, previousCycleStartedAt, cycleStarts |
-| INVITE#<token> | META | inviterUserId, status, ttl |
+| INVITE#<token> | META | inviterUserId, status, ttl, createdAt, openedAt |
 | DEVICE#<APNsトークン> | META | userId（この端末の持ち主） |
 | USER#<id> | FEEDBACK#<ISO日時>#<id> | body, appVersion, createdAt（ご意見） |
 
@@ -55,6 +55,9 @@ GSI（2個）:
   - **所有者がキーで表現される**。自分のパーティションしか引けないので、他人のことづてを編集する経路が構造的に存在しない
 - 「ユーザー→ペア」は USER の META に pairId を持たせて解決（1人1ペア前提、GSI不要）
 - 「招待」はトークンで直引き（GetItem）のため GSI 不要
+- **招待は期限が切れても消さない。** テーブルの TTL は無効のまま（`ttl` は受けるときの条件で使うだけ）。
+  管理画面の「登録からペアまで」が過去の招待を数えているので、TTL を有効にすると集計が欠ける。
+  `openedAt` は招待された側のアプリが `GET /invites/{token}` を呼んだ最初の時刻（2026-11-25 から記録）
 - **端末は最後に登録したアカウントだけのもの**（`DEVICE#<トークン>`）。`PATCH /me` で端末を登録するとき、
   前の持ち主が別人ならそちらから `apnsToken`/`snsEndpointArn` を外す。`apnsToken: ""` は「外す」（サインアウト用）。
   これが無いと、同じ端末でアカウントを切り替えたとき**前のアカウント宛ての通知が次の人の端末に届いた**
