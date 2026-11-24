@@ -71,3 +71,48 @@ func TestAggregate(t *testing.T) {
 		t.Errorf("weekly not ascending: %s .. %s", s.Weekly[0].WeekStart, last.WeekStart)
 	}
 }
+
+func TestFunnel(t *testing.T) {
+	rows := []row{
+		// a: 書いて招待して、相手が開いたがまだ受けていない
+		{PK: "USER#a", SK: "META", CreatedAt: "2026-11-16T00:00:00Z"},
+		{PK: "USER#a", SK: "KOTOZUTE#2026-11-16T01:00:00Z#1"},
+		{PK: "INVITE#a1", SK: "META", CreatedAt: "2026-11-16T02:00:00Z", InviterUserID: "a", Status: "pending"},
+		{PK: "INVITE#a2", SK: "META", CreatedAt: "2026-11-17T02:00:00Z", InviterUserID: "a", Status: "pending", OpenedAt: "2026-11-18T00:00:00Z"},
+		// b が招待し、c が受けてペアになった
+		{PK: "USER#b", SK: "META", CreatedAt: "2026-11-10T00:00:00Z", PairID: "p"},
+		{PK: "INVITE#b1", SK: "META", CreatedAt: "2026-11-10T01:00:00Z", InviterUserID: "b", Status: "accepted", OpenedAt: "2026-11-10T03:00:00Z"},
+		{PK: "USER#c", SK: "META", CreatedAt: "2026-11-10T04:00:00Z", PairID: "p"},
+		// d: 登録しただけ
+		{PK: "USER#d", SK: "META", CreatedAt: "2026-11-20T00:00:00Z"},
+		// 古いユーザー（作成日時なし）は数えない
+		{PK: "USER#old", SK: "META", PairID: "q"},
+		{PK: "INVITE#o1", SK: "META", CreatedAt: "2026-08-01T00:00:00Z", InviterUserID: "old", Status: "accepted"},
+		// ユーザーが消えたあとの招待も数えない
+		{PK: "INVITE#g1", SK: "META", CreatedAt: "2026-11-01T00:00:00Z", InviterUserID: "gone", Status: "pending"},
+	}
+
+	f, recent := funnelOf(rows)
+
+	want := funnel{Started: 3, Wrote: 1, Invited: 2, InviteOpened: 2, Paired: 1, JoinedByInvite: 1}
+	if f != want {
+		t.Errorf("funnel = %+v, want %+v", f, want)
+	}
+	if len(recent) != 4 {
+		t.Fatalf("recent len = %d, want 4", len(recent))
+	}
+	// 新しい順。
+	if recent[0].RegisteredAt != "2026-11-20T00:00:00Z" {
+		t.Errorf("recent[0] = %+v", recent[0])
+	}
+	a := recent[1]
+	if a.Invites != 2 || a.FirstInviteAt != "2026-11-16T02:00:00Z" || a.InviteOpenedAt != "2026-11-18T00:00:00Z" || a.Paired {
+		t.Errorf("a = %+v", a)
+	}
+	if c := recent[2]; !c.JoinedByInvite || !c.Paired {
+		t.Errorf("c = %+v", c)
+	}
+	if b := recent[3]; b.JoinedByInvite || !b.Paired {
+		t.Errorf("b = %+v", b)
+	}
+}

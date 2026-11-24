@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -99,6 +100,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return errorResponse(http.StatusInternalServerError, "failed to fetch inviter kotozute"), nil
 	}
 
+	if status.Value == "pending" {
+		markOpened(ctx, token, time.Now())
+	}
+
 	resBody, err := json.Marshal(inviteInfoResponse{
 		InviterDisplayName: displayName.Value,
 		Status:             status.Value,
@@ -137,6 +142,32 @@ func hasAnyKotozute(ctx context.Context, userID string) (bool, error) {
 		return false, err
 	}
 	return len(out.Items) > 0, nil
+}
+
+// markOpened は招待が初めて開かれた時刻を残す（管理画面の「招待→成立」の計測用）。
+//
+// これを呼ぶのは招待された側のアプリだけ（招待した本人の画面はこの API を使わない）。
+// なので「openedAt がある」＝「相手がアプリを入れて招待を開いた」と読める。
+// 2回目以降は if_not_exists で最初の時刻を残す。
+//
+// 計測のための書き込みなので、失敗しても招待の表示は止めない。
+func markOpened(ctx context.Context, token string, now time.Time) {
+	_, err := dynamoClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"PK": &types.AttributeValueMemberS{Value: fmt.Sprintf("INVITE#%s", token)},
+			"SK": &types.AttributeValueMemberS{Value: "META"},
+		},
+		UpdateExpression: aws.String("SET openedAt = if_not_exists(openedAt, :now)"),
+		// 無い招待を作ってしまわないように。
+		ConditionExpression: aws.String("attribute_exists(PK)"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":now": &types.AttributeValueMemberS{Value: now.UTC().Format(time.RFC3339)},
+		},
+	})
+	if err != nil {
+		log.Printf("mark invite opened: %v", err)
+	}
 }
 
 // isInviteExpired はINVITE METAのttl（unix epoch秒）と現在時刻を比較する。
